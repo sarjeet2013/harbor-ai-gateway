@@ -1,6 +1,6 @@
 # Harbor AI Gateway
 
-**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, **exact response cache** (tokens saved), and a **why-log** on every request.
+**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, **exact response cache** (tokens saved), and a **ledger** on every request.
 
 Goal: usable on one machine, something to build on — not an enterprise control plane.
 
@@ -8,7 +8,7 @@ Goal: usable on one machine, something to build on — not an enterprise control
 
 | Layer | Owner |
 | --- | --- |
-| Day budget gate, heuristic router, response cache, why-log | **Us** (FastAPI edge `:4000`) |
+| Day budget gate, heuristic router, response cache, ledger | **Us** (FastAPI edge `:4000`) |
 | Provider adapters, keys, OpenAI-compatible proxy | **LiteLLM** (`:4001`, managed by CLI) |
 | Cursor / Claude Code / Codex | **Clients** (attach via `config/clients/`) |
 
@@ -27,7 +27,7 @@ flowchart LR
     BUDGET[Day budget gate]
     ROUTER[Heuristic router]
     CACHE[Response cache]
-    WHY[Why-log]
+    LEDGER[Ledger]
   end
 
   LITELLM["(CLI-managed) LiteLLM :4001"]
@@ -39,11 +39,11 @@ flowchart LR
   CODEX -->|/v1/responses or chat| BUDGET
 
   BUDGET --> ROUTER --> CACHE
-  CACHE -->|miss| WHY --> LITELLM --> UP
-  CACHE -->|hit| WHY
+  CACHE -->|miss| LEDGER --> LITELLM --> UP
+  CACHE -->|hit| LEDGER
 ```
 
-**Request path:** Client → edge `:4000` → budget → router → **cache** → why-log → (CLI-managed) LiteLLM `:4001` (or mock) → providers → client. Cache hits skip upstream.
+**Request path:** Client → edge `:4000` → budget → router → **cache** → ledger → (CLI-managed) LiteLLM `:4001` (or mock) → providers → client. Cache hits skip upstream.
 
 ## Quick start (recommended CLI)
 
@@ -174,20 +174,20 @@ curl -s http://127.0.0.1:4000/v1/responses \
   -d '{"model":"mock-cheap","input":"hi"}'
 ```
 
-## Budget + router + why-log
+## Budget + router + ledger
 
 - **Day budget** (`daily_budget_usd`): tracked in memory and persisted to `data/budget.json`.
 - **`on_budget_exceeded`**: `force_cheap` (default) or `reject` (HTTP 429).
 - **Heuristic router**: cheap by default; expensive if prompt matches `router.expensive_keywords` or exceeds `expensive_min_chars`.
-- **Why-log**: JSONL at `logs/why.jsonl` — each line has `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`, plus `cache_hit` / `cache_kind` / `tokens_saved*`.
+- **Ledger**: JSONL at `logs/ledger.jsonl` — each line has `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`, plus `cache_hit` / `cache_kind` / `tokens_saved*`.
 
 
 ## Cache (shipping: exact)
 
-Exact response cache on local disk (`data/cache/`) — **enabled by default** in `config/gateway.yaml` (`cache.enabled: true`, TTL 24h). Hits skip upstream and do **not** charge the day budget; why-log records `cache_hit`, `cache_kind`, and `tokens_saved*`.
+Exact response cache on local disk (`data/cache/`) — **enabled by default** in `config/gateway.yaml` (`cache.enabled: true`, TTL 24h). Hits skip upstream and do **not** charge the day budget; ledger records `cache_hit`, `cache_kind`, and `tokens_saved*`.
 
 ```bash
-python -m edge cache-stats   # hit rate + tokens_saved from why-log
+python -m edge cache-stats   # hit rate + tokens_saved from ledger
 ```
 
 Semantic cache and intelligent (judge) routing are **planned** (not shipped). Details: **[docs/features/cache.md](docs/features/cache.md)**.
@@ -229,7 +229,7 @@ Logs: `logs/edge.log`, `logs/litellm.log`.
 
 ## v0 scope
 
-**In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact response cache + tokens_saved; why-log; single YAML; CLI start/stop; client attach docs; mock mode for demos.
+**In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact response cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode for demos.
 
 **Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned later:** semantic cache; intelligent/judge routing.
 

@@ -5,11 +5,11 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 ## Components
 
 1. **Clients** — curl/SDK first; Codex (`/v1/responses` or chat); Claude Code (Anthropic `/v1/messages`); Cursor (public HTTPS + LiteLLM `/cursor`).
-2. **Edge (ours)** — FastAPI on `:4000` (`listen`); budget → router → **cache** → why-log before upstream. Started by `python -m edge start`. Cache hits **skip upstream**.
+2. **Edge (ours)** — FastAPI on `:4000` (`listen`); budget → router → **cache** → ledger before upstream. Started by `python -m edge start`. Cache hits **skip upstream**.
 3. **Day budget** — spend-so-far vs `daily_budget_usd`; over budget → `on_budget_exceeded` (`force_cheap` | `reject`). Persisted to `budget_state_path` (default `data/budget.json`). Pure cache hits do **not** increment spend.
 4. **Heuristic router** — classify request; pick from `models.cheap` / `models.expensive` pools (alias = each entry’s `name`).
 5. **Response cache** — exact hash cache on disk (`data/cache/`); see [features/cache.md](features/cache.md). **Semantic cache** and **intelligent (judge) routing** are **planned after exact cache** (not built yet).
-6. **Why-log** — JSONL at `why_log_path` (default `logs/why.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields when implemented (`cache_hit`, `cache_kind`, `tokens_saved*`).
+6. **Ledger** — JSONL at `ledger_path` (default `logs/ledger.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields when implemented (`cache_hit`, `cache_kind`, `tokens_saved*`).
 7. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
 8. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
 9. **Config** — single canonical `config/gateway.yaml`. LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
@@ -34,7 +34,7 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 | `python -m edge stop` | Stop via pidfile / ports |
 | `python -m edge status` | Ports, pids, `upstream_mode`, model pools |
 | `python -m edge config-check` | Print resolved aliases → `litellm_model` |
-| `python -m edge cache-stats` | Hit rate + total `tokens_saved` from why-log (+ disk entry count) |
+| `python -m edge cache-stats` | Hit rate + total `tokens_saved` from ledger (+ disk entry count) |
 
 ## Diagram
 
@@ -51,7 +51,7 @@ flowchart LR
     BUDGET[Day budget gate]
     ROUTER[Heuristic router]
     CACHE[Response cache]
-    WHY[Why-log]
+    LEDGER[Ledger]
   end
 
   LITELLM["(CLI-managed) LiteLLM :4001"]
@@ -63,11 +63,11 @@ flowchart LR
   CODEX -->|/v1/responses or chat| BUDGET
 
   BUDGET --> ROUTER --> CACHE
-  CACHE -->|miss| WHY --> LITELLM --> UP
-  CACHE -->|hit skip upstream| WHY
+  CACHE -->|miss| LEDGER --> LITELLM --> UP
+  CACHE -->|hit skip upstream| LEDGER
 ```
 
-Same path for all clients once traffic hits the edge: clients → edge `:4000` → budget → router → **cache** → why-log → (CLI-managed) LiteLLM `:4001` (or mock) → providers. Cache hits return immediately after why-log (no upstream).
+Same path for all clients once traffic hits the edge: clients → edge `:4000` → budget → router → **cache** → ledger → (CLI-managed) LiteLLM `:4001` (or mock) → providers. Cache hits return immediately after ledger (no upstream).
 
 ## Planned (not yet shipped)
 

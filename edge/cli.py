@@ -419,12 +419,12 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 
 def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
-    """Summarize cache hits / tokens_saved from why-log (+ disk entry count)."""
+    """Summarize cache hits / tokens_saved from ledger (+ disk entry count)."""
     ensure_deps()
     cfg = load_config()
-    why_path = Path(cfg.why_log_path)
-    if not why_path.is_absolute():
-        why_path = repo_root() / why_path
+    ledger_file = Path(cfg.ledger_path)
+    if not ledger_file.is_absolute():
+        ledger_file = repo_root() / ledger_file
 
     total = 0
     hits = 0
@@ -433,8 +433,8 @@ def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
     tokens_saved_completion = 0
     by_kind: dict[str, int] = {}
 
-    if why_path.exists():
-        with why_path.open() as f:
+    if ledger_file.exists():
+        with ledger_file.open() as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -466,7 +466,7 @@ def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
     print(f"cache.mode:        {cfg.cache.mode}")
     print(f"cache.path:        {disk['path']}")
     print(f"disk.entries:      {disk['entries']} / {disk['max_entries']}")
-    print(f"why-log:           {why_path}")
+    print(f"ledger:            {ledger_file}")
     print(f"requests (w/cache fields): {total}")
     print(f"hits:              {hits}")
     print(f"hit_rate:          {hit_rate:.1%}")
@@ -532,7 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     cache_p = sub.add_parser(
         "cache-stats",
-        help="summarize cache hits / tokens_saved from why-log",
+        help="summarize cache hits / tokens_saved from ledger",
     )
     cache_p.set_defaults(func=cmd_cache_stats)
 

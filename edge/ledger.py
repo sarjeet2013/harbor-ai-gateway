@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 
-class WhyLog:
+class Ledger:
+    """Append-only JSONL decision / cost ledger for each edge request."""
+
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         if not self._path.is_absolute():
@@ -26,3 +28,7 @@ class WhyLog:
         with self._lock:
             with self._path.open("a") as f:
                 f.write(line)
+
+
+# Back-compat for any external imports
+WhyLog = Ledger

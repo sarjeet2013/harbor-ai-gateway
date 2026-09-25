@@ -85,7 +85,7 @@ def _mock_cfg(tmp_path: Path) -> GatewayConfig:
     return GatewayConfig(
         listen="127.0.0.1:0",
         upstream_mode="mock",
-        why_log_path=str(tmp_path / "why.jsonl"),
+        ledger_path=str(tmp_path / "ledger.jsonl"),
         budget_state_path=str(tmp_path / "budget.json"),
         models=ModelsConfig(
             cheap=[ModelSpec(name="mock-cheap")],
@@ -119,7 +119,7 @@ def test_hit_path_via_app(tmp_path: Path):
     assert body1["choices"][0]["message"]["content"] == body2["choices"][0]["message"]["content"]
     assert body1["id"] == body2["id"]  # cached body reused
 
-    lines = (tmp_path / "why.jsonl").read_text().strip().splitlines()
+    lines = (tmp_path / "ledger.jsonl").read_text().strip().splitlines()
     assert len(lines) >= 2
     miss = json.loads(lines[-2])
     hit = json.loads(lines[-1])
@@ -147,5 +147,5 @@ def test_bypass_header_skips_hit(tmp_path: Path):
         headers={"X-Cache-Bypass": "1"},
     )
     assert r2.status_code == 200
-    hit_line = json.loads((tmp_path / "why.jsonl").read_text().strip().splitlines()[-1])
+    hit_line = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
     assert hit_line["cache_hit"] is False

@@ -19,13 +19,13 @@ from .translate import (
     chat_to_responses,
     responses_to_chat,
 )
-from .why_log import WhyLog
+from .ledger import Ledger
 
 
 def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     config = cfg or load_config()
     budget = DayBudget(config)
-    why = WhyLog(config.why_log_path)
+    ledger = Ledger(config.ledger_path)
     proxy = LiteLLMProxy(config.litellm_base_url)
     cache = ResponseCache(config.cache)
 
@@ -36,7 +36,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     app = FastAPI(title="Harbor AI Gateway", version="0.1.0", lifespan=lifespan)
     app.state.config = config
     app.state.budget = budget
-    app.state.why = why
+    app.state.ledger = ledger
     app.state.cache = cache
 
     @app.get("/healthz")
@@ -69,7 +69,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         client_model = body.get("model")
         action, spent, remaining = budget.check()
         if action == "reject":
-            why.write(
+            ledger.write(
                 {
                     "surface": surface,
                     "model": client_model,
@@ -117,7 +117,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             )
             if hit is not None:
                 # Pure cache hit: do not increment day spend.
-                why.write(
+                ledger.write(
                     {
                         "surface": surface,
                         "model": decision.model,
@@ -214,7 +214,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                     response=result,
                 )
 
-        why.write(
+        ledger.write(
             {
                 "surface": surface,
                 "model": decision.model,

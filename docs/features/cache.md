@@ -7,13 +7,13 @@ Harbor’s differentiation vs smart-routing-only gateways: prove value with **to
 ## Goals
 
 - Reduce token spend by serving identical (and later: similar) requests from a local cache.
-- Prove gateway value: every hit records `tokens_saved*` in the why-log.
+- Prove gateway value: every hit records `tokens_saved*` in the ledger.
 - Stay personal/MVP: local disk only — **no Redis required**.
 
 ## Request path
 
 ```
-budget → router → cache → why-log → upstream (LiteLLM / mock)
+budget → router → cache → ledger → upstream (LiteLLM / mock)
 ```
 
 On a **hit**, the edge returns the cached JSON body and **skips upstream**. Day budget is **not** charged on pure hits (`cost_usd: 0`).
@@ -58,7 +58,7 @@ Local disk under `data/cache/` (configurable via `cache.path`):
 
 Gitignored via `data/*`.
 
-## Why-log / metrics (required)
+## Ledger / metrics (required)
 
 Every request (including misses and budget rejects) includes:
 
@@ -72,7 +72,7 @@ Every request (including misses and budget rejects) includes:
 
 On miss: `cache_hit: false`, `cache_kind: "none"`, all `tokens_saved*` = `0`.
 
-**Future value-add:** aggregate dashboard / richer CLI UX around `python -m edge cache-stats` (hit rate + total tokens saved from why-log). The basic CLI command ships with exact cache.
+**Future value-add:** aggregate dashboard / richer CLI UX around `python -m edge cache-stats` (hit rate + total tokens saved from ledger). The basic CLI command ships with exact cache.
 
 Example hit line (fields abbreviated):
 
@@ -111,14 +111,14 @@ Default for local Mac testing: **`enabled: true`**, TTL 24h.
 
 1. `edge/cache.py` — `normalize_for_hash`, `get` / `set`, disk persistence, TTL, max_entries.
 2. `edge/main.py` `_handle` — after `pick_model`, before mock/LiteLLM:
-   - On hit → return cached body; why-log with savings; **no** `budget.record`.
-   - On miss → upstream; on success store entry; why-log miss fields.
-3. `python -m edge cache-stats` — hit rate + `tokens_saved` totals from why-log + disk entry count.
+   - On hit → return cached body; ledger with savings; **no** `budget.record`.
+   - On miss → upstream; on success store entry; ledger miss fields.
+3. `python -m edge cache-stats` — hit rate + `tokens_saved` totals from ledger + disk entry count.
 
 ## Testing notes
 
 - Unit: hash stability for equivalent normalized payloads; hit path returns same body and `tokens_saved > 0`.
-- Integration (mock): two identical `POST /v1/chat/completions` → second why-log line has `cache_hit: true`.
+- Integration (mock): two identical `POST /v1/chat/completions` → second ledger line has `cache_hit: true`.
 - Bypass: `X-Cache-Bypass: 1` forces miss/store skip as configured.
 - Streaming: `"stream": true` never hits/stores.
 
@@ -130,6 +130,6 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
   -d '{"model":"mock-cheap","messages":[{"role":"user","content":"cache me"}]}'
 # repeat same curl → cache hit
 python -m edge cache-stats
-tail -1 logs/why.jsonl
+tail -1 logs/ledger.jsonl
 python -m edge stop
 ```

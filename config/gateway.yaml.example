@@ -9,7 +9,7 @@ upstream_mode: litellm  # mock | litellm
 daily_budget_usd: 10.0
 on_budget_exceeded: force_cheap  # force_cheap | reject
 budget_state_path: "data/budget.json"
-why_log_path: "logs/why.jsonl"
+ledger_path: "logs/ledger.jsonl"
 
 cost_estimates_usd:
   cheap_per_request: 0.0

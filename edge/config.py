@@ -98,11 +98,23 @@ class GatewayConfig(BaseModel):
     daily_budget_usd: float = 10.0
     on_budget_exceeded: str = "force_cheap"  # force_cheap | reject
     budget_state_path: str = "data/budget.json"
-    why_log_path: str = "logs/why.jsonl"
+    ledger_path: str = "logs/ledger.jsonl"  # was why_log_path / logs/why.jsonl
     cost_estimates_usd: CostEstimates = Field(default_factory=CostEstimates)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_why_log_path(cls, data: Any) -> Any:
+        """Accept deprecated why_log_path as an alias for ledger_path."""
+        if isinstance(data, dict) and "ledger_path" not in data and "why_log_path" in data:
+            data = dict(data)
+            data["ledger_path"] = data.pop("why_log_path")
+        elif isinstance(data, dict) and "why_log_path" in data:
+            data = dict(data)
+            data.pop("why_log_path", None)
+        return data
 
     @model_validator(mode="after")
     def _resolve_litellm_base_url(self) -> GatewayConfig:

@@ -94,12 +94,12 @@ curl -s http://127.0.0.1:4000/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{"model":"ollama-cheap","input":"Say hi in one short sentence."}'
 
-# Why-log
-tail -n 5 logs/why.jsonl
+# Ledger
+tail -n 5 logs/ledger.jsonl
 
 ```
 
-Expect a real model reply (not a mock stub) and a why-log line with
+Expect a real model reply (not a mock stub) and a ledger line with
 `model` + `reason` (e.g. `ollama-cheap` / `heuristic:default_cheap`).
 
 
