@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Smoke-test OpenAI chat, Anthropic messages, and OpenAI responses against the edge.
+# Expects mock mode (mock-cheap / mock-expensive). Start with:
+#   GATEWAY_CONFIG=config/gateway.mock.yaml python -m edge start
+#   # or: upstream_mode: mock + mock-* models in gateway.yaml
 set -euo pipefail
 
 BASE="${GATEWAY_BASE_URL:-http://127.0.0.1:4000}"

@@ -79,9 +79,25 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"auto","messages":[{"role":"user","content":"Please refactor this architecture and design a system."}],"max_tokens":64}'
 
+# Anthropic messages (Claude Code) — edge translates to chat/completions for Ollama
+curl -s http://127.0.0.1:4000/v1/messages \
+  -H 'Content-Type: application/json' \
+  -H 'x-api-key: sk-local-gateway' \
+  -H 'anthropic-version: 2023-06-01' \
+  -d '{"model":"ollama-cheap","max_tokens":64,"messages":[{"role":"user","content":"Say hi in one short sentence."}]}'
+
+# OpenAI responses (Codex) — also translated to chat/completions
+curl -s http://127.0.0.1:4000/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"ollama-cheap","input":"Say hi in one short sentence."}'
+
 # Why-log
 tail -n 5 logs/why.jsonl
+
 ```
 
 Expect a real model reply (not a mock stub) and a why-log line with
 `model` + `reason` (e.g. `ollama-cheap` / `heuristic:default_cheap`).
+
+
+`/v1/messages` and `/v1/responses` are implemented on the edge and translated to `/v1/chat/completions` before LiteLLM, so Ollama does not need native Anthropic or Responses support.

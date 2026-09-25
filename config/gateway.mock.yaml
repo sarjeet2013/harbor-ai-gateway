@@ -1,0 +1,33 @@
+# Mock upstream — no LiteLLM / Ollama / API keys.
+# Use: GATEWAY_CONFIG=config/gateway.mock.yaml python -m edge start
+# Then: ./scripts/smoke.sh
+listen: "0.0.0.0:4000"
+litellm_host: "127.0.0.1"
+litellm_port: 4001
+upstream_mode: mock
+
+daily_budget_usd: 10.0
+on_budget_exceeded: force_cheap
+budget_state_path: "data/budget.json"
+why_log_path: "logs/why.jsonl"
+
+cost_estimates_usd:
+  cheap_per_request: 0.001
+  expensive_per_request: 0.02
+
+models:
+  cheap:
+    - name: mock-cheap
+  expensive:
+    - name: mock-expensive
+
+router:
+  strategy: heuristic_cost_first
+  expensive_keywords:
+    - "refactor"
+    - "architecture"
+    - "design a system"
+    - "complex"
+    - "analyze the entire"
+    - "write a detailed"
+  expensive_min_chars: 2000

@@ -9,8 +9,9 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 3. **Day budget** — spend-so-far vs `daily_budget_usd`; over budget → `on_budget_exceeded` (`force_cheap` | `reject`). Persisted to `budget_state_path` (default `data/budget.json`).
 4. **Heuristic router** — classify request; pick from `models.cheap` / `models.expensive` pools (alias = each entry’s `name`).
 5. **Why-log** — JSONL at `why_log_path` (default `logs/why.jsonl`): model, reason, pool, tokens, cost, status.
-6. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
-7. **Config** — single canonical `config/gateway.yaml`. LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
+6. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
+7. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
+8. **Config** — single canonical `config/gateway.yaml`. LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
 
 ## Surfaces (edge)
 
@@ -19,8 +20,8 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 | `GET /healthz` | Health + budget snapshot |
 | `GET /v1/budget` | Day spend snapshot |
 | `POST /v1/chat/completions` | OpenAI Chat Completions |
-| `POST /v1/messages` | Anthropic Messages (Claude Code) |
-| `POST /v1/responses` | OpenAI Responses (Codex `wire_api=responses`) |
+| `POST /v1/messages` | Anthropic Messages (Claude Code); in `litellm` mode edge translates ↔ chat/completions |
+| `POST /v1/responses` | OpenAI Responses (Codex `wire_api=responses`); in `litellm` mode edge translates ↔ chat/completions |
 | `/cursor/*` | Proxied to LiteLLM when `upstream_mode: litellm` |
 
 ## CLI

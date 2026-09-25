@@ -1,0 +1,55 @@
+"""Unit tests for Anthropic/Responses <-> chat translation."""
+from edge.translate import (
+    anthropic_to_chat,
+    chat_to_anthropic,
+    chat_to_responses,
+    responses_to_chat,
+)
+
+
+def test_anthropic_roundtrip():
+    body = {
+        "model": "ollama-cheap",
+        "max_tokens": 64,
+        "system": "be brief",
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+    }
+    chat_req = anthropic_to_chat(body, "ollama-cheap")
+    assert chat_req["model"] == "ollama-cheap"
+    assert chat_req["max_tokens"] == 64
+    assert chat_req["messages"][0] == {"role": "system", "content": "be brief"}
+    assert chat_req["messages"][1]["content"] == "hi"
+
+    chat_resp = {
+        "id": "chatcmpl-x",
+        "choices": [{"message": {"role": "assistant", "content": "hello"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+    }
+    out = chat_to_anthropic(chat_resp, "ollama-cheap")
+    assert out["type"] == "message"
+    assert out["content"][0]["text"] == "hello"
+    assert out["usage"]["input_tokens"] == 3
+
+
+def test_anthropic_default_max_tokens():
+    chat_req = anthropic_to_chat(
+        {"model": "m", "messages": [{"role": "user", "content": "x"}]}, "m"
+    )
+    assert chat_req["max_tokens"] == 1024
+
+
+def test_responses_roundtrip():
+    body = {"model": "ollama-cheap", "input": "hi there"}
+    chat_req = responses_to_chat(body, "ollama-cheap")
+    assert chat_req["messages"] == [{"role": "user", "content": "hi there"}]
+
+    chat_resp = {
+        "id": "chatcmpl-y",
+        "created": 1,
+        "choices": [{"message": {"role": "assistant", "content": "yo"}}],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+    }
+    out = chat_to_responses(chat_resp, "ollama-cheap")
+    assert out["object"] == "response"
+    assert out["status"] == "completed"
+    assert out["output"][0]["content"][0]["text"] == "yo"

@@ -12,6 +12,12 @@ from .config import GatewayConfig, load_config
 from .mock_upstream import mock_anthropic_message, mock_chat_completion, mock_responses
 from .proxy import LiteLLMProxy
 from .router import pick_model
+from .translate import (
+    anthropic_to_chat,
+    chat_to_anthropic,
+    chat_to_responses,
+    responses_to_chat,
+)
 from .why_log import WhyLog
 
 
@@ -48,6 +54,8 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         surface: str,
         path: str,
         mock_fn,
+        # litellm mode: translate Anthropic/Responses <-> chat/completions (Ollama-safe)
+        translate: str | None = None,
     ) -> Response:
         try:
             body: dict[str, Any] = await request.json()
@@ -103,9 +111,30 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             status = "ok"
         else:
             headers = {k: v for k, v in request.headers.items()}
+            upstream_path = path
+            upstream_body = body
+            if translate == "anthropic":
+                upstream_path = "/v1/chat/completions"
+                upstream_body = anthropic_to_chat(body, decision.model)
+            elif translate == "responses":
+                upstream_path = "/v1/chat/completions"
+                upstream_body = responses_to_chat(body, decision.model)
+
             status_code, result = await proxy.forward(
-                "POST", path, json_body=body, headers=headers
+                "POST", upstream_path, json_body=upstream_body, headers=headers
             )
+            if (
+                status_code < 400
+                and isinstance(result, dict)
+                and translate == "anthropic"
+            ):
+                result = chat_to_anthropic(result, decision.model)
+            elif (
+                status_code < 400
+                and isinstance(result, dict)
+                and translate == "responses"
+            ):
+                result = chat_to_responses(result, decision.model)
             status = "ok" if status_code < 400 else "upstream_error"
 
         cost = est
@@ -158,22 +187,25 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
 
     @app.post("/v1/messages")
     async def anthropic_messages(request: Request) -> Response:
-        # Claude Code / Anthropic SDK hit /v1/messages (base URL without /v1)
+        # Claude Code / Anthropic SDK hit /v1/messages (base URL without /v1).
+        # litellm mode: translate <-> chat/completions so Ollama always works.
         return await _handle(
             request,
             surface="anthropic.messages",
             path="/v1/messages",
             mock_fn=mock_anthropic_message,
+            translate="anthropic",
         )
 
     @app.post("/v1/responses")
     async def openai_responses(request: Request) -> Response:
-        # Codex wire_api=responses
+        # Codex wire_api=responses. litellm mode: translate <-> chat/completions.
         return await _handle(
             request,
             surface="openai.responses",
             path="/v1/responses",
             mock_fn=mock_responses,
+            translate="responses",
         )
 
     # LiteLLM Cursor path: clients may call /cursor/...; proxy through when litellm mode
