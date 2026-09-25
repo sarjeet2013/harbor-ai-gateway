@@ -53,3 +53,15 @@ def test_responses_roundtrip():
     assert out["object"] == "response"
     assert out["status"] == "completed"
     assert out["output"][0]["content"][0]["text"] == "yo"
+
+
+def test_anthropic_clamps_max_tokens():
+    chat_req = anthropic_to_chat(
+        {
+            "model": "m",
+            "max_tokens": 32000,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        "m",
+    )
+    assert chat_req["max_tokens"] == 16384

@@ -13,10 +13,21 @@ class RouteDecision:
     reason: str
 
 
-def _extract_text(body: dict[str, Any]) -> str:
+def _extract_text(body: dict[str, Any], *, include_system: bool = False) -> str:
+    """Text used for heuristic routing.
+
+    Default skips Anthropic/OpenAI system prompts: Claude Code (and similar
+    agents) inject large system instructions that contain words like
+    "refactor" / "architecture" and would falsely force the expensive pool.
+    """
     parts: list[str] = []
-    # OpenAI chat
+    # OpenAI chat / Anthropic messages — user (+ assistant) turns only by default
     for m in body.get("messages") or []:
+        if not isinstance(m, dict):
+            continue
+        role = (m.get("role") or "").lower()
+        if role == "system" and not include_system:
+            continue
         c = m.get("content")
         if isinstance(c, str):
             parts.append(c)
@@ -42,14 +53,14 @@ def _extract_text(body: dict[str, Any]) -> str:
                     for block in c:
                         if isinstance(block, dict) and "text" in block:
                             parts.append(str(block["text"]))
-    # Anthropic sometimes uses system
-    sys = body.get("system")
-    if isinstance(sys, str):
-        parts.append(sys)
-    elif isinstance(sys, list):
-        for block in sys:
-            if isinstance(block, dict) and "text" in block:
-                parts.append(str(block["text"]))
+    if include_system:
+        sys = body.get("system")
+        if isinstance(sys, str):
+            parts.append(sys)
+        elif isinstance(sys, list):
+            for block in sys:
+                if isinstance(block, dict) and "text" in block:
+                    parts.append(str(block["text"]))
     return "\n".join(parts)
 
 
@@ -80,14 +91,26 @@ def pick_model(
         pool = wanted
         reason = f"heuristic:{heur}"
 
+    # Explicit Harbor alias always wins (Claude Code ANTHROPIC_MODEL, Cursor custom models).
+    cheap_names = list(cfg.models.cheap_names or [])
+    expensive_names = list(cfg.models.expensive_names or [])
+    if client_model and client_model in cheap_names:
+        return RouteDecision(
+            model=client_model,
+            pool="cheap",
+            reason=reason + ";client_model",
+        )
+    if client_model and client_model in expensive_names and not force_cheap:
+        return RouteDecision(
+            model=client_model,
+            pool="expensive",
+            reason=reason + ";client_model",
+        )
+
     models = cfg.models.names(pool)
     if not models:
-        models = cfg.models.cheap_names or ["mock-cheap"]
+        models = cheap_names or ["mock-cheap"]
         pool = "cheap"
         reason += ";fallback_empty_pool"
-
-    # If client named a model that sits in the chosen pool, keep it
-    if client_model and client_model in models:
-        return RouteDecision(model=client_model, pool=pool, reason=reason + ";client_model")
 
     return RouteDecision(model=models[0], pool=pool, reason=reason)

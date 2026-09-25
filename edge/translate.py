@@ -55,8 +55,11 @@ def anthropic_to_chat(body: dict[str, Any], model: str) -> dict[str, Any]:
         messages = [{"role": "user", "content": ""}]
 
     out: dict[str, Any] = {"model": model, "messages": messages}
-    # Anthropic requires max_tokens; default so LiteLLM never TypeErrors
-    out["max_tokens"] = int(body.get("max_tokens") or 1024)
+    # Anthropic requires max_tokens; Claude Code often sends 32k+. Clamp so
+    # OpenAI gpt-4o-mini (16k completion cap) and similar don't 400.
+    _MAX_COMPLETION_TOKENS = 16384
+    requested = int(body.get("max_tokens") or 1024)
+    out["max_tokens"] = max(1, min(requested, _MAX_COMPLETION_TOKENS))
     for key in ("temperature", "top_p", "stream", "stop", "user"):
         if key in body and body[key] is not None:
             out[key] = body[key]
