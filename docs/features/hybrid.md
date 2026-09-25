@@ -29,6 +29,40 @@ Harbor authenticates *clients* with a local bearer (e.g. `sk-local-gateway`). Th
 
 Comment out the OpenAI entry in `config/gateway.yaml` and use the commented `ollama-expensive` block instead (point `api_base` at the same Ollama host; no cloud key). Set `cost_estimates_usd.expensive_per_request` back to `0.0` if you want.
 
+
+## CLI: list / set model pools
+
+`config/gateway.yaml` **`models.cheap` / `models.expensive`** remain the source of truth (no admin UI). Open fields for the CLI are **model id** (`litellm_model`) and **`api_base`**, plus optional enable/disable on the pool’s primary entry.
+
+```bash
+# Show current pools
+python -m edge models
+# same: python -m edge models list
+
+# Point cheap at Mini Ollama (short id → ollama_chat/… when --api-base is set)
+python -m edge models set --pool cheap --model qwen3:8b --api-base http://192.168.4.31:11434
+
+# Bump expensive OpenAI model (no api_base → openai/… prefix)
+python -m edge models set --pool expensive --model gpt-4o-mini
+# or full LiteLLM id: --model openai/gpt-4o
+
+# Optional: disable a pool’s primary entry (skipped by LiteLLM gen + router names)
+python -m edge models set --pool expensive --disable
+
+# Dry-run (no write)
+python -m edge models set --pool cheap --model qwen3:8b --api-base http://192.168.4.31:11434 --dry-run
+```
+
+After a successful write, restart so edge + LiteLLM reload config:
+
+```bash
+python -m edge stop && python -m edge start
+```
+
+`models set` rewrites YAML with PyYAML (**inline comments are not preserved**). Prefer `config/gateway.yaml.example` as the annotated template, or hand-edit `gateway.yaml` when you need comments.
+
+`python -m edge doctor` soft-probes each configured Ollama `api_base` with `GET /api/tags` (reachable + model names). If Mini is down it **warns** only — doctor still succeeds when deps are OK.
+
 ## Smoke
 
 `./scripts/smoke.sh` always requires cheap + stream (+ ledger). For the expensive-keyword prompt:

@@ -6,6 +6,17 @@
 **Keys:** everyday Ollama needs **no** cloud key. For expensive/heuristic OpenAI: `export OPENAI_API_KEY=...`  
 Details: **[docs/features/hybrid.md](docs/features/hybrid.md)**.
 
+### Change model / api_base via CLI
+
+```bash
+python -m edge models
+python -m edge models set --pool cheap --model qwen3:8b --api-base http://192.168.4.31:11434
+python -m edge stop && python -m edge start   # required after set
+python -m edge doctor   # soft-probes Ollama /api/tags
+```
+
+`gateway.yaml` stays canonical; see [docs/features/hybrid.md](docs/features/hybrid.md).
+
 ## One-time setup
 
 ```bash

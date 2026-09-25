@@ -72,7 +72,7 @@ pip install -r requirements-litellm.txt
 > Without `requirements-litellm.txt`, `python -m edge start` / `doctor` fail *before* generating
 > config — no late surprise. Cheap/Ollama needs no cloud key; expensive needs `OPENAI_API_KEY`.
 
-Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing; also checks LiteLLM when `upstream_mode` is `litellm`). LiteLLM is launched as `python -m edge.litellm_cli` (same interpreter as the edge CLI) so a stale `.venv/bin/litellm` shebang cannot break `start` while `doctor` still passes.
+Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing; also checks LiteLLM when `upstream_mode` is `litellm`; soft-probes configured Ollama hosts). List/set pools: `python -m edge models` / `models set` (see CLI reference). LiteLLM is launched as `python -m edge.litellm_cli` (same interpreter as the edge CLI) so a stale `.venv/bin/litellm` shebang cannot break `start` while `doctor` still passes.
 
 ```bash
 # Check aliases that will be sent to LiteLLM (catches missing litellm_model)
@@ -229,8 +229,12 @@ Legacy: pools as bare string lists (`cheap: ["ollama-cheap"]`) still load for th
 | `python -m edge stop` | Kill via pidfile / ports |
 | `python -m edge status` | Ports, pids, upstream_mode, models |
 | `python -m edge config-check` | Print resolved aliases → `litellm_model` |
+| `python -m edge models` / `models list` | Show cheap/expensive: alias, `litellm_model`, `api_base`, enabled |
+| `python -m edge models set --pool …` | Edit primary pool entry (`--model`, `--api-base`, `--enable`/`--disable`); writes `gateway.yaml` |
 | `python -m edge cache-stats` | Cache hit rate + total tokens saved |
-| `python -m edge doctor` | Verify edge deps (+ LiteLLM when config is litellm mode) |
+| `python -m edge doctor` | Verify edge deps (+ LiteLLM when litellm mode); soft-probe Ollama `api_base` (`GET /api/tags`) |
+
+**Model pools (no admin UI):** `config/gateway.yaml` stays the source of truth. Use `python -m edge models set` for low-thrash edits of model id + `api_base` on **cheap** / **expensive** only. `models set` round-trips with PyYAML (inline comments are not preserved — see `config/gateway.yaml.example`). Restart after set: `python -m edge stop && python -m edge start`.
 
 Logs: `logs/edge.log`, `logs/litellm.log`.
 

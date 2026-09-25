@@ -20,6 +20,8 @@ class ModelSpec(BaseModel):
     name: str
     litellm_model: str | None = None
     api_base: str | None = None
+    # Pool entry toggle (CLI: python -m edge models set --enable/--disable)
+    enabled: bool = True
     # Extra litellm_params merged into generated LiteLLM config
     extra_litellm_params: dict[str, Any] = Field(default_factory=dict)
 
@@ -55,7 +57,7 @@ class ModelsConfig(BaseModel):
 
     def names(self, pool: str) -> list[str]:
         specs = self.cheap if pool == "cheap" else self.expensive
-        return [m.name for m in specs]
+        return [m.name for m in specs if m.enabled]
 
     @property
     def cheap_names(self) -> list[str]:

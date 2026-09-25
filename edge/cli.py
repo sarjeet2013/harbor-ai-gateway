@@ -1,4 +1,4 @@
-"""CLI: python -m edge {start|stop|status|config-check|cache-stats|doctor}"""
+"""CLI: python -m edge {start|stop|status|config-check|cache-stats|doctor|models}"""
 
 from __future__ import annotations
 
@@ -591,27 +591,163 @@ def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
 
 
 
+
+def cmd_models_list(_args: argparse.Namespace | None = None) -> int:
+    """Show cheap/expensive pool entries (alias, litellm_model, api_base, enabled)."""
+    ensure_deps()
+    from .models_yaml import default_gateway_path, list_pool_rows
+
+    cfg = load_config()
+    rows = list_pool_rows(cfg)
+    if not rows:
+        print("models: (none configured)")
+        return 0
+    print(f"models (source: {default_gateway_path()}):")
+    for row in rows:
+        en = "enabled" if row["enabled"] else "DISABLED"
+        print(
+            f"  [{row['pool']}] alias={row['alias']!r} "
+            f"litellm_model={row['litellm_model']!r} "
+            f"api_base={row['api_base']!r}  [{en}]"
+        )
+    return 0
+
+
+def cmd_models_set(args: argparse.Namespace) -> int:
+    """Edit primary cheap/expensive entry in gateway.yaml (model id + api_base)."""
+    ensure_deps()
+    from .models_yaml import (
+        POOLS,
+        apply_pool_set,
+        default_gateway_path,
+        dump_raw_yaml,
+        load_raw_yaml,
+    )
+
+    pool = (args.pool or "").strip().lower()
+    if pool not in POOLS:
+        print(f"error: --pool must be one of {POOLS}", file=sys.stderr)
+        return 1
+
+    if args.enable and args.disable:
+        print("error: use only one of --enable / --disable", file=sys.stderr)
+        return 1
+
+    has_model = args.model is not None
+    has_api = getattr(args, "api_base", None) is not None or getattr(
+        args, "clear_api_base", False
+    )
+    has_toggle = bool(args.enable or args.disable)
+    has_name = bool(getattr(args, "name", None))
+    if not (has_model or has_api or has_toggle or has_name):
+        print(
+            "error: provide --model and/or --api-base / --clear-api-base "
+            "and/or --enable/--disable (and optional --name)",
+            file=sys.stderr,
+        )
+        return 1
+
+    path = Path(args.config) if getattr(args, "config", None) else default_gateway_path()
+    raw = load_raw_yaml(path)
+
+    api_base_arg: object = ...
+    if getattr(args, "clear_api_base", False):
+        api_base_arg = None
+    elif getattr(args, "api_base", None) is not None:
+        api_base_arg = args.api_base
+
+    enabled = True if args.enable else (False if args.disable else None)
+    try:
+        entry = apply_pool_set(
+            raw,
+            pool,
+            model=args.model,
+            api_base=api_base_arg,
+            enabled=enabled,
+            name=getattr(args, "name", None),
+        )
+    except (ValueError, TypeError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    kind = "dry-run" if args.dry_run else "updated"
+    print(f"{kind} {path}  pool={pool}")
+    print(
+        f"  alias={entry.get('name')!r} "
+        f"litellm_model={entry.get('litellm_model')!r} "
+        f"api_base={entry.get('api_base')!r} "
+        f"enabled={entry.get('enabled', True)}"
+    )
+    if args.dry_run:
+        print("no write (--dry-run)")
+        return 0
+
+    dump_raw_yaml(path, raw)
+    print(
+        "note: PyYAML rewrite may drop inline comments "
+        "(see config/gateway.yaml.example for the annotated template)."
+    )
+    print("restart to apply: python -m edge stop && python -m edge start")
+    return 0
+
+
+def cmd_models(args: argparse.Namespace) -> int:
+    """Dispatch `models` / `models list` / `models set`."""
+    sub = getattr(args, "models_command", None) or "list"
+    if sub == "set":
+        return cmd_models_set(args)
+    return cmd_models_list(args)
+
+
+def _doctor_probe_ollama(cfg: GatewayConfig) -> None:
+    """Soft-check configured Ollama api_base hosts (warn only; never fails doctor)."""
+    from .models_yaml import collect_ollama_bases, probe_ollama_tags
+
+    bases = collect_ollama_bases(cfg)
+    if not bases:
+        print("ollama probe: (no ollama api_base in cheap/expensive pools)")
+        return
+    print("ollama probe:")
+    for row in bases:
+        ok, names, err = probe_ollama_tags(row["api_base"])
+        label = f"{row['api_base']}  (pool={row['pool']} alias={row['alias']})"
+        if ok:
+            preview = ", ".join(names[:12])
+            more = f" (+{len(names) - 12} more)" if len(names) > 12 else ""
+            print(f"  reachable: {label}")
+            print(f"    models: {preview or '(none)'}{more}")
+        else:
+            print(f"  UNREACHABLE: {label}")
+            print(f"    warn: {err}  (cheap/Ollama may fail until host is up)")
+
+
 def cmd_doctor(_args: argparse.Namespace | None = None) -> int:
-    """Check required edge deps; if config is litellm mode, also require LiteLLM."""
+    """Check required edge deps; if config is litellm mode, also require LiteLLM.
+
+    Also soft-probes Ollama ``api_base`` hosts (``GET /api/tags``) — warns if down.
+    """
     ensure_deps()
     cfg = load_config()
+    rc = 0
     if cfg.upstream_mode == "litellm":
         if not litellm_ready():
             print(format_litellm_missing_message(), file=sys.stderr)
-            return 1
-        print(preflight_ok_message(litellm_checked=True))
-        cmd = resolve_litellm_cmd()
-        if cmd:
-            print(f"LiteLLM launch: {' '.join(cmd)}")
-        return 0
-    # mock (or other): litellm optional
-    print(preflight_ok_message(litellm_checked=False))
-    if not litellm_ready():
-        print(
-            "note: litellm not installed (OK for mock mode). "
-            "For Ollama/real providers: pip install -r requirements-litellm.txt"
-        )
-    return 0
+            rc = 1
+        else:
+            print(preflight_ok_message(litellm_checked=True))
+            cmd = resolve_litellm_cmd()
+            if cmd:
+                print(f"LiteLLM launch: {' '.join(cmd)}")
+    else:
+        # mock (or other): litellm optional
+        print(preflight_ok_message(litellm_checked=False))
+        if not litellm_ready():
+            print(
+                "note: litellm not installed (OK for mock mode). "
+                "For Ollama/real providers: pip install -r requirements-litellm.txt"
+            )
+    _doctor_probe_ollama(cfg)
+    return rc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -651,9 +787,63 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_p = sub.add_parser(
         "doctor",
         aliases=["deps-check"],
-        help="verify edge deps (+ litellm when upstream_mode is litellm)",
+        help="verify edge deps (+ litellm when litellm mode); soft-probe Ollama api_base",
     )
     doctor_p.set_defaults(func=cmd_doctor)
+
+    models_p = sub.add_parser(
+        "models",
+        help="list or set cheap/expensive model id + api_base in gateway.yaml",
+    )
+    models_p.set_defaults(func=cmd_models, models_command="list")
+    models_sub = models_p.add_subparsers(dest="models_command")
+
+    models_list_p = models_sub.add_parser(
+        "list", help="show cheap/expensive alias, litellm_model, api_base, enabled"
+    )
+    models_list_p.set_defaults(func=cmd_models, models_command="list")
+
+    models_set_p = models_sub.add_parser(
+        "set",
+        help="edit primary entry for a pool (writes gateway.yaml; restart to apply)",
+    )
+    models_set_p.add_argument(
+        "--pool",
+        required=True,
+        choices=["cheap", "expensive"],
+        help="which pool to edit",
+    )
+    models_set_p.add_argument(
+        "--model",
+        help="model id (e.g. qwen3:8b or gpt-4o-mini); prefixes ollama_chat/ or openai/ if bare",
+    )
+    models_set_p.add_argument(
+        "--api-base",
+        dest="api_base",
+        help="provider base URL (e.g. http://192.168.4.31:11434 for Ollama)",
+    )
+    models_set_p.add_argument(
+        "--clear-api-base",
+        action="store_true",
+        help="remove api_base (cloud providers)",
+    )
+    models_set_p.add_argument(
+        "--name",
+        help="optional alias (LiteLLM model_name), e.g. ollama-cheap",
+    )
+    en = models_set_p.add_mutually_exclusive_group()
+    en.add_argument("--enable", action="store_true", help="mark pool primary entry enabled")
+    en.add_argument("--disable", action="store_true", help="mark pool primary entry disabled")
+    models_set_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the resulting entry without writing gateway.yaml",
+    )
+    models_set_p.add_argument(
+        "--config",
+        help="gateway.yaml path (default: GATEWAY_CONFIG or config/gateway.yaml)",
+    )
+    models_set_p.set_defaults(func=cmd_models, models_command="set")
 
     return p
 
@@ -665,7 +855,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     # Defense in depth when CLI is imported without going through __main__
-    if args.command in ("start", "status", "config-check", "cache-stats", "doctor", "deps-check"):
+    if args.command in (
+        "start",
+        "status",
+        "config-check",
+        "cache-stats",
+        "doctor",
+        "deps-check",
+        "models",
+    ):
         ensure_deps()
     return int(args.func(args))
 

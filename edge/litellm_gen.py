@@ -35,6 +35,9 @@ def build_litellm_config(cfg: GatewayConfig) -> dict[str, Any]:
     model_list: list[dict[str, Any]] = []
     skipped: list[str] = []
     for spec in cfg.models.all_specs():
+        if not spec.enabled:
+            skipped.append(spec.name)
+            continue
         params = _params_for(spec)
         if params is None:
             skipped.append(spec.name)
@@ -96,7 +99,8 @@ def resolved_aliases(cfg: GatewayConfig | None = None) -> list[dict[str, Any]]:
                     "alias": spec.name,
                     "litellm_model": spec.litellm_model,
                     "api_base": spec.api_base,
-                    "will_send_to_litellm": bool(spec.litellm_model),
+                    "enabled": spec.enabled,
+                    "will_send_to_litellm": bool(spec.litellm_model) and spec.enabled,
                 }
             )
     return rows
