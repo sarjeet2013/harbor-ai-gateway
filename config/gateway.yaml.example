@@ -1,7 +1,7 @@
 # Edge + LiteLLM pointer (v0)
 listen: "0.0.0.0:4000"
 litellm_base_url: "http://127.0.0.1:4001"
-upstream_mode: mock  # mock | litellm
+upstream_mode: litellm  # mock | litellm  (use litellm for Ollama e2e)
 
 daily_budget_usd: 10.0
 on_budget_exceeded: force_cheap  # force_cheap | reject
@@ -10,12 +10,13 @@ budget_state_path: "data/budget.json"
 why_log_path: "logs/why.jsonl"
 
 cost_estimates_usd:
-  cheap_per_request: 0.001
-  expensive_per_request: 0.02
+  cheap_per_request: 0.0
+  expensive_per_request: 0.0
 
 models:
-  cheap: ["mock-cheap", "gpt-4o-mini", "ollama/llama3.2"]
-  expensive: ["mock-expensive", "claude-sonnet-4", "gpt-4o"]
+  # Ollama e2e (see RUN_OLLAMA.md). For mock demos use ["mock-cheap"] / ["mock-expensive"].
+  cheap: ["ollama-cheap"]
+  expensive: ["ollama-expensive"]
 
 router:
   strategy: heuristic_cost_first
