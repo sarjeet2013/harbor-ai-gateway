@@ -3,15 +3,17 @@
 Keep REQUIRED_IMPORTS in sync with requirements.txt whenever you add a new
 runtime dependency under edge/. Import name → pip package name (for messages).
 
-litellm is intentionally NOT listed here: it is optional and only needed when
-upstream_mode is litellm (mock mode works without it). Install separately:
-  pip install 'litellm[proxy]'
+litellm is intentionally NOT in REQUIRED_IMPORTS: it is only needed when
+upstream_mode is litellm (mock mode works without it). Install via:
+  pip install -r requirements-litellm.txt
+  # or: pip install 'litellm[proxy]'
 """
 
 from __future__ import annotations
 
 import importlib
 import sys
+from shutil import which
 from typing import Iterable, Mapping
 
 # import_name -> pip install name (as shown to the user)
@@ -23,11 +25,21 @@ REQUIRED_IMPORTS: dict[str, str] = {
     "uvicorn": "uvicorn",
 }
 
+LITELLM_IMPORT = "litellm"
+LITELLM_PIP = "litellm[proxy]"
+LITELLM_REQUIREMENTS = "requirements-litellm.txt"
+
 INSTALL_HINT = (
     "Activate your venv, then install dependencies:\n"
     "  pip install -r requirements.txt\n"
-    "Optional (real providers / Ollama via LiteLLM):\n"
-    "  pip install 'litellm[proxy]'"
+    "For Ollama / real providers (upstream_mode: litellm), also install:\n"
+    f"  pip install -r {LITELLM_REQUIREMENTS}\n"
+    f"  # or: pip install '{LITELLM_PIP}'"
+)
+
+LITELLM_INSTALL_HINT = (
+    f"Install: pip install '{LITELLM_PIP}'\n"
+    f"  # or: pip install -r {LITELLM_REQUIREMENTS}"
 )
 
 
@@ -76,5 +88,64 @@ def ensure_deps(
     raise SystemExit(1)
 
 
-def preflight_ok_message() -> str:
+def litellm_importable() -> bool:
+    """True if `import litellm` succeeds."""
+    try:
+        importlib.import_module(LITELLM_IMPORT)
+        return True
+    except ImportError:
+        return False
+
+
+def resolve_litellm_cmd() -> list[str] | None:
+    """Return argv prefix to launch LiteLLM, or None if not resolvable.
+
+    Requires the litellm package to import in *this* interpreter, then prefers
+    `litellm` on PATH (venv scripts), else ``python -m litellm``.
+    """
+    if not litellm_importable():
+        return None
+    litellm_bin = which("litellm")
+    if litellm_bin:
+        return [litellm_bin]
+    return [sys.executable, "-m", "litellm"]
+
+
+def litellm_ready() -> bool:
+    """True when litellm imports and a CLI launch command is resolvable."""
+    return litellm_importable() and resolve_litellm_cmd() is not None
+
+
+def format_litellm_missing_message() -> str:
+    return (
+        "LiteLLM is required for upstream_mode: litellm "
+        "(default Ollama gateway.yaml), but it is not available.\n"
+        f"  - import litellm: {'OK' if litellm_importable() else 'MISSING'}\n"
+        f"  - litellm CLI:    {'OK' if resolve_litellm_cmd() else 'MISSING'}\n"
+        f"{LITELLM_INSTALL_HINT}"
+    )
+
+
+def ensure_litellm(*, stream=None) -> list[str]:
+    """Require litellm import + resolvable CLI; exit 1 with install hint if not.
+
+    Returns the resolved CLI argv prefix when OK (for callers that spawn).
+    """
+    cmd = resolve_litellm_cmd()
+    if litellm_importable() and cmd is not None:
+        return cmd
+    out = sys.stderr if stream is None else stream
+    print(format_litellm_missing_message(), file=out)
+    raise SystemExit(1)
+
+
+def ensure_upstream_deps(upstream_mode: str, *, stream=None) -> None:
+    """After core deps + config load: require litellm when mode will launch it."""
+    if (upstream_mode or "").strip().lower() == "litellm":
+        ensure_litellm(stream=stream)
+
+
+def preflight_ok_message(*, litellm_checked: bool = False) -> str:
+    if litellm_checked:
+        return "OK: required edge dependencies and LiteLLM are installed."
     return "OK: all required edge dependencies are installed."

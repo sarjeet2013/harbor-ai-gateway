@@ -13,7 +13,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .deps import ensure_deps, preflight_ok_message
+from .deps import (
+    ensure_deps,
+    ensure_upstream_deps,
+    format_litellm_missing_message,
+    litellm_ready,
+    preflight_ok_message,
+    resolve_litellm_cmd,
+)
 from .config import GatewayConfig, load_config, repo_root
 from .litellm_gen import resolved_aliases, write_litellm_config
 
@@ -80,13 +87,11 @@ def _warn_cloud_keys(cfg: GatewayConfig) -> None:
 
 
 def _find_litellm_cmd() -> list[str]:
-    # Prefer `litellm` on PATH (venv), else python -m litellm
-    from shutil import which
-
-    litellm_bin = which("litellm")
-    if litellm_bin:
-        return [litellm_bin]
-    return [sys.executable, "-m", "litellm"]
+    # Prefer `litellm` on PATH (venv), else python -m litellm (when importable).
+    cmd = resolve_litellm_cmd()
+    if cmd is None:
+        raise SystemExit(format_litellm_missing_message())
+    return cmd
 
 
 def _start_litellm(cfg: GatewayConfig, litellm_cfg: Path, *, detach: bool) -> subprocess.Popen:
@@ -295,6 +300,8 @@ def cmd_config_check(_args: argparse.Namespace | None = None) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     ensure_deps()
     cfg = load_config()
+    # Require litellm import + CLI *before* generating config / spawning
+    ensure_upstream_deps(cfg.upstream_mode)
     _ensure_dirs()
     _warn_cloud_keys(cfg)
 
@@ -469,9 +476,22 @@ def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
 
 
 def cmd_doctor(_args: argparse.Namespace | None = None) -> int:
-    """Run dependency preflight only; print OK or missing modules."""
+    """Check required edge deps; if config is litellm mode, also require LiteLLM."""
     ensure_deps()
-    print(preflight_ok_message())
+    cfg = load_config()
+    if cfg.upstream_mode == "litellm":
+        if not litellm_ready():
+            print(format_litellm_missing_message(), file=sys.stderr)
+            return 1
+        print(preflight_ok_message(litellm_checked=True))
+        return 0
+    # mock (or other): litellm optional
+    print(preflight_ok_message(litellm_checked=False))
+    if not litellm_ready():
+        print(
+            "note: litellm not installed (OK for mock mode). "
+            "For Ollama/real providers: pip install -r requirements-litellm.txt"
+        )
     return 0
 
 
@@ -512,7 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_p = sub.add_parser(
         "doctor",
         aliases=["deps-check"],
-        help="verify required Python packages are installed",
+        help="verify edge deps (+ litellm when upstream_mode is litellm)",
     )
     doctor_p.set_defaults(func=cmd_doctor)
 

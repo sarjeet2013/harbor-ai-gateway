@@ -7,5 +7,5 @@ pyyaml==6.0.2
 pydantic==2.10.4
 
 # Optional — only for upstream_mode: litellm (real providers / Ollama).
-# Not required for mock mode. Install separately:
-#   pip install 'litellm[proxy]'
+# Not required for mock mode. See requirements-litellm.txt:
+#   pip install -r requirements.txt -r requirements-litellm.txt

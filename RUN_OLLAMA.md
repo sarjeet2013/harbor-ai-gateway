@@ -13,11 +13,14 @@ ollama pull llama3.2:3b
 ollama list
 
 # Clone / enter repo
-cd ~/local-llm-gateway   # or wherever you cloned sarjeet2013/local-llm-gateway
+cd ~/harbor-ai-gateway   # or wherever you cloned sarjeet2013/harbor-ai-gateway
 git pull
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt 'litellm[proxy]'
+# Core + LiteLLM (required — default gateway.yaml is upstream_mode: litellm)
+pip install -r requirements.txt -r requirements-litellm.txt
+# equivalent: pip install -r requirements.txt 'litellm[proxy]'
+python -m edge doctor   # must report LiteLLM OK before start
 mkdir -p logs data
 ```
 
@@ -44,7 +47,7 @@ Ollama does not need `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. If those are set in
 ## Start / stop (one command)
 
 ```bash
-cd ~/local-llm-gateway && source .venv/bin/activate
+cd ~/harbor-ai-gateway && source .venv/bin/activate
 
 # Sanity: aliases must include ollama-cheap / ollama-expensive
 python -m edge config-check

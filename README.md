@@ -49,21 +49,25 @@ flowchart LR
 
 One config file (`config/gateway.yaml`) defines listen ports, budget, router, and model pools (including LiteLLM `litellm_model` + `api_base`). The CLI generates LiteLLM YAML and starts both processes.
 
-**Install once (required):**
+**Install once:**
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# Core edge deps (always)
 pip install -r requirements.txt
+
+# REQUIRED for default config (upstream_mode: litellm / Ollama).
+# Skip only if you run mock mode (GATEWAY_CONFIG=config/gateway.mock.yaml).
+pip install -r requirements-litellm.txt
+# equivalent: pip install 'litellm[proxy]'
 ```
 
-**Optional** (real providers / Ollama — skip for mock mode):
+> **Default `config/gateway.yaml` is Ollama + LiteLLM.** Without `requirements-litellm.txt`,
+> `python -m edge start` / `doctor` fail *before* generating config — no late surprise.
 
-```bash
-pip install 'litellm[proxy]'
-```
-
-Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing).
+Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing; also checks LiteLLM when `upstream_mode` is `litellm`).
 
 ```bash
 # Check aliases that will be sent to LiteLLM (catches missing litellm_model)
@@ -85,7 +89,13 @@ When `upstream_mode: mock`, LiteLLM is **not** started.
 
 ## Quick start (Ollama on Mac — real local models)
 
-See **[RUN_OLLAMA.md](RUN_OLLAMA.md)** — pull `llama3.2:1b` / `llama3.2:3b`, then `python -m edge start`.
+See **[RUN_OLLAMA.md](RUN_OLLAMA.md)**. One-liner after venv activate:
+
+```bash
+pip install -r requirements.txt -r requirements-litellm.txt
+```
+
+Then pull `llama3.2:1b` / `llama3.2:3b` and `python -m edge start`.
 
 ## Quick start (mock mode — no API keys / no LiteLLM)
 
@@ -211,6 +221,7 @@ Legacy: pools as bare string lists (`cheap: ["ollama-cheap"]`) still load for th
 | `python -m edge status` | Ports, pids, upstream_mode, models |
 | `python -m edge config-check` | Print resolved aliases → `litellm_model` |
 | `python -m edge cache-stats` | Cache hit rate + total tokens saved |
+| `python -m edge doctor` | Verify edge deps (+ LiteLLM when config is litellm mode) |
 
 Logs: `logs/edge.log`, `logs/litellm.log`.
 
