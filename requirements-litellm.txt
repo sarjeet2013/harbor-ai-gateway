@@ -4,6 +4,6 @@
 #
 # Pin: older litellm used a broken Ollama async-stream path
 # (async_generator / async_get_ollama_response_stream). >=1.72 uses
-# httpx streaming; 1.102.x verified with Harbor chat SSE.
+# httpx streaming; pair with pydantic==2.12.5 in requirements.txt.
 litellm[proxy]>=1.72.0,<2
 async_generator>=1.10  # transitive safety for any remaining async helpers

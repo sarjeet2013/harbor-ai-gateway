@@ -4,7 +4,8 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 pyyaml==6.0.2
-pydantic==2.10.4
+# litellm[proxy] >=1.72 pins pydantic==2.12.5; keep edge aligned so joint install resolves.
+pydantic==2.12.5
 
 # Optional — only for upstream_mode: litellm (real providers / Ollama).
 # Not required for mock mode. See requirements-litellm.txt:
