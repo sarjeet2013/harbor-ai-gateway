@@ -116,7 +116,7 @@ def test_stream_bypasses_cache(tmp_path: Path):
         assert row.get("stream") is True
 
 
-def test_messages_stream_returns_501(tmp_path: Path):
+def test_messages_stream_anthropic_sse(tmp_path: Path):
     cfg = _mock_cfg(tmp_path)
     app = create_app(cfg)
     client = TestClient(app)
@@ -126,12 +126,23 @@ def test_messages_stream_returns_501(tmp_path: Path):
             "model": "mock-cheap",
             "max_tokens": 32,
             "stream": True,
-            "messages": [{"role": "user", "content": "no stream yet"}],
+            "messages": [{"role": "user", "content": "hello messages stream"}],
         },
     )
-    assert r.status_code == 501
-    err = r.json()["error"]
-    assert err["type"] == "streaming_not_supported"
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers.get("content-type", "")
+    body = r.text
+    assert "event: message_start" in body
+    assert "event: content_block_delta" in body
+    assert "event: message_stop" in body
+    assert "text_delta" in body
+    _ = body  # drain
+    lines = (tmp_path / "ledger.jsonl").read_text().strip().splitlines()
+    assert lines
+    row = json.loads(lines[-1])
+    assert row["surface"] == "anthropic.messages"
+    assert row.get("stream") is True
+    assert row["status"] == "ok"
 
 
 def test_responses_stream_returns_501(tmp_path: Path):

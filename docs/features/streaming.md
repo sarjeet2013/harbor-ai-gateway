@@ -1,12 +1,12 @@
 # Feature: Streaming
 
-**Status:** **Shipped (v1 chat).** `POST /v1/chat/completions` with `"stream": true` returns OpenAI-style SSE (`text/event-stream`) via passthrough from LiteLLM/Ollama, or mock SSE when `upstream_mode: mock`. Anthropic Messages and OpenAI Responses streaming are **not** shipped — those surfaces return **HTTP 501** with a clear error if `stream: true` (prefer that over silently buffering).
+**Status:** **Shipped (v1 chat + Anthropic messages).** `POST /v1/chat/completions` with `"stream": true` returns OpenAI-style SSE; `POST /v1/messages` with `"stream": true` returns Anthropic Messages SSE (via chat upstream + remap) (`text/event-stream`) via passthrough from LiteLLM/Ollama, or mock SSE when `upstream_mode: mock`. OpenAI Responses streaming is **not** shipped — `/v1/responses` returns **HTTP 501** if `stream: true`. Anthropic Messages streaming is shipped (Claude Code).
 
 `stream: true` **bypasses the response cache** (no hit/store) — see [cache.md](cache.md). After a chat stream completes successfully, the edge writes **one** ledger line and calls `budget.record` once (usage parsed from the final SSE chunk when present; otherwise tokens empty / cost from estimates). Mid-stream failure → ledger `status` reflects the error.
 
 ## What clients need
 
-OpenAI-style SSE on `POST /v1/chat/completions` with `"stream": true` (Cursor / SDKs / many tools). Anthropic Messages and OpenAI Responses streaming are follow-ons (harder because Harbor translates those surfaces ↔ chat).
+OpenAI-style SSE on `POST /v1/chat/completions` and Anthropic Messages SSE on `POST /v1/messages` (Claude Code). OpenAI Responses streaming is a follow-on.
 
 ## What is needed (implementation checklist)
 
@@ -23,7 +23,7 @@ OpenAI-style SSE on `POST /v1/chat/completions` with `"stream": true` (Cursor / 
 
 ### Later — other surfaces
 
-7. **`/v1/messages` streaming** — translate Anthropic stream ↔ chat SSE (or stream chat upstream and re-encode Anthropic events). Today: **501** if `stream: true`.
+7. **`/v1/messages` streaming** — **done** (chat upstream + Anthropic SSE remap; collect-then-remap v1).
 8. **`/v1/responses` streaming** — same idea for the Responses wire format. Today: **501** if `stream: true`.
 9. **`/cursor/*`** — only if Cursor attach still needs edge-level SSE beyond LiteLLM’s own proxy.
 

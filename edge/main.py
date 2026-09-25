@@ -24,12 +24,16 @@ from .translate import (
     anthropic_to_chat,
     chat_to_anthropic,
     chat_to_responses,
+    openai_chat_sse_to_anthropic_sse,
+    openai_chat_sse_to_anthropic_sse_sync,
     responses_to_chat,
 )
 from .ledger import Ledger
 
 # Surfaces that support streaming in v1
 _CHAT_SURFACE = "openai.chat.completions"
+_MESSAGES_SURFACE = "anthropic.messages"
+_STREAM_SURFACES = {_CHAT_SURFACE, _MESSAGES_SURFACE}
 
 
 def _parse_usage_from_sse(raw: bytes) -> dict[str, Any]:
@@ -101,8 +105,9 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         decision: Any,
         client_model: Any,
         est: float,
+        translate: str | None = None,
     ) -> Response:
-        """SSE passthrough for OpenAI chat completions (v1). Ledger/budget once after complete."""
+        """SSE for chat (passthrough) and Anthropic messages (chat upstream + remap)."""
 
         async def _tee_and_record(
             chunks: AsyncIterator[bytes] | Iterator[bytes],
@@ -150,14 +155,27 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                     }
                 )
 
+        # Anthropic messages stream: translate to chat, then remap SSE to Anthropic events.
+        upstream_path = path
+        upstream_body = body
+        if translate == "anthropic":
+            upstream_path = "/v1/chat/completions"
+            upstream_body = anthropic_to_chat(body, decision.model)
+            upstream_body["stream"] = True
+
         if config.upstream_mode == "mock":
+            mock_iter = mock_chat_completion_stream(upstream_body, decision.model)
+            if translate == "anthropic":
+                mock_iter = openai_chat_sse_to_anthropic_sse_sync(
+                    mock_iter, model=decision.model
+                )
             return StreamingResponse(
-                _tee_and_record(mock_chat_completion_stream(body, decision.model)),
+                _tee_and_record(mock_iter),
                 media_type="text/event-stream",
             )
 
         status_code, up_headers, aiter, err = await proxy.forward_stream(
-            "POST", path, json_body=body, headers=headers
+            "POST", upstream_path, json_body=upstream_body, headers=headers
         )
         if aiter is None:
             # Non-2xx before body — surface as JSON error (not SSE)
@@ -191,7 +209,10 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         # Prefer event-stream even if upstream omitted it
         if "event-stream" not in media and "json" not in media:
             media = "text/event-stream"
-        return StreamingResponse(_tee_and_record(aiter), media_type="text/event-stream")
+        out_iter: AsyncIterator[bytes] | Iterator[bytes] = aiter
+        if translate == "anthropic":
+            out_iter = openai_chat_sse_to_anthropic_sse(aiter, model=decision.model)
+        return StreamingResponse(_tee_and_record(out_iter), media_type="text/event-stream")
 
     async def _handle(
         request: Request,
@@ -240,16 +261,16 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 status_code=429,
             )
 
-        # v1 streaming: chat only. Prefer clear 501 over silently buffering.
-        if body.get("stream") is True and surface != _CHAT_SURFACE:
+        # v1 streaming: chat + Anthropic messages. Responses still 501.
+        if body.get("stream") is True and surface not in _STREAM_SURFACES:
             return JSONResponse(
                 {
                     "error": {
                         "type": "streaming_not_supported",
                         "message": (
-                            "stream:true is only supported on POST /v1/chat/completions "
-                            "in Harbor v1. Anthropic Messages and OpenAI Responses "
-                            "streaming are planned. Omit stream or use chat completions."
+                            "stream:true is supported on POST /v1/chat/completions and "
+                            "POST /v1/messages in Harbor v1. OpenAI Responses streaming "
+                            "is planned. Omit stream or use chat/messages."
                         ),
                         "surface": surface,
                     }
@@ -306,8 +327,8 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             else config.cost_estimates_usd.expensive_per_request
         )
 
-        # Chat streaming path (cache already bypassed via should_bypass_cache)
-        if body.get("stream") is True and surface == _CHAT_SURFACE:
+        # Streaming path (cache already bypassed via should_bypass_cache)
+        if body.get("stream") is True and surface in _STREAM_SURFACES:
             return await _handle_stream(
                 body=body,
                 surface=surface,
@@ -316,6 +337,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 decision=decision,
                 client_model=client_model,
                 est=est,
+                translate=translate,
             )
 
         status_code = 200

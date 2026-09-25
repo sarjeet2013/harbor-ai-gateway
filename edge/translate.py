@@ -8,8 +8,10 @@ litellm mode, then reshapes the response.
 """
 from __future__ import annotations
 
+import json
 import time
 import uuid
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 
@@ -165,3 +167,169 @@ def chat_to_responses(chat: dict[str, Any], model: str) -> dict[str, Any]:
             ),
         },
     }
+
+
+def format_anthropic_sse(event: str, data: dict[str, Any]) -> bytes:
+    """One Anthropic Messages SSE event (event: + data: + blank line)."""
+    return (
+        f"event: {event}\n"
+        f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    ).encode("utf-8")
+
+
+def _parse_openai_chat_sse_objects(raw: bytes) -> list[dict[str, Any]]:
+    """Parse OpenAI chat.completion.chunk JSON objects from an SSE byte buffer."""
+    objs: list[dict[str, Any]] = []
+    text = raw.decode("utf-8", errors="replace")
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            obj = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            objs.append(obj)
+    return objs
+
+
+def openai_chat_chunks_to_anthropic_sse(
+    chat_objs: list[dict[str, Any]], *, model: str
+) -> list[bytes]:
+    """Build Anthropic Messages SSE events from OpenAI chat chunk objects."""
+    msg_id = f"msg_{uuid.uuid4().hex[:12]}"
+    input_tokens = 0
+    output_tokens = 0
+    stop_reason = "end_turn"
+    text_parts: list[str] = []
+
+    for obj in chat_objs:
+        usage = obj.get("usage")
+        if isinstance(usage, dict):
+            input_tokens = int(
+                usage.get("prompt_tokens")
+                or usage.get("input_tokens")
+                or input_tokens
+                or 0
+            )
+            output_tokens = int(
+                usage.get("completion_tokens")
+                or usage.get("output_tokens")
+                or output_tokens
+                or 0
+            )
+        choices = obj.get("choices") or []
+        if not choices:
+            continue
+        ch0 = choices[0] or {}
+        fr = ch0.get("finish_reason")
+        if fr == "length":
+            stop_reason = "max_tokens"
+        elif fr == "stop":
+            stop_reason = "end_turn"
+        delta = ch0.get("delta") or {}
+        piece = delta.get("content")
+        if piece:
+            text_parts.append(str(piece))
+
+    events: list[bytes] = [
+        format_anthropic_sse(
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model,
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": 0,
+                    },
+                },
+            },
+        ),
+        format_anthropic_sse(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+        ),
+    ]
+    # Emit text in one or more deltas (chunk by ~40 chars for friendlier UX)
+    full = "".join(text_parts)
+    if not full:
+        full = ""
+    step = 48
+    for i in range(0, max(len(full), 1), step):
+        piece = full[i : i + step]
+        if not piece and i > 0:
+            break
+        events.append(
+            format_anthropic_sse(
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": piece},
+                },
+            )
+        )
+    events.append(
+        format_anthropic_sse(
+            "content_block_stop", {"type": "content_block_stop", "index": 0}
+        )
+    )
+    events.append(
+        format_anthropic_sse(
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                "usage": {
+                    "output_tokens": output_tokens or max(1, len(full) // 4),
+                    "input_tokens": input_tokens,
+                },
+            },
+        )
+    )
+    events.append(format_anthropic_sse("message_stop", {"type": "message_stop"}))
+    return events
+
+
+def openai_chat_sse_to_anthropic_sse_sync(
+    chunks: Iterator[bytes], *, model: str
+) -> Iterator[bytes]:
+    """Sync: collect OpenAI chat SSE, emit Anthropic Messages SSE."""
+    collected = bytearray()
+    for chunk in chunks:
+        collected.extend(chunk)
+    yield from openai_chat_chunks_to_anthropic_sse(
+        _parse_openai_chat_sse_objects(bytes(collected)), model=model
+    )
+
+
+async def openai_chat_sse_to_anthropic_sse(
+    chunks: AsyncIterator[bytes], *, model: str
+) -> AsyncIterator[bytes]:
+    """Async: collect OpenAI chat SSE, emit Anthropic Messages SSE.
+
+    Collects the upstream stream then remaps. True token-at-a-time remap can
+    follow; Claude Code needs correct Anthropic SSE event types more than
+    mid-token latency for Harbor v1.
+    """
+    collected = bytearray()
+    async for chunk in chunks:
+        collected.extend(chunk)
+    for event in openai_chat_chunks_to_anthropic_sse(
+        _parse_openai_chat_sse_objects(bytes(collected)), model=model
+    ):
+        yield event

@@ -162,6 +162,23 @@ else
 fi
 
 echo
+
+echo "== Anthropic /v1/messages stream =="
+MSCODE=$(curl -s -o /tmp/gw_msg_stream.txt -w "%{http_code}" \
+  -X POST "$BASE/v1/messages" \
+  -H "content-type: application/json" \
+  -H "x-api-key: sk-local-gateway" \
+  -H "anthropic-version: 2023-06-01" \
+  -d "{\"model\":\"$CHEAP_MODEL\",\"max_tokens\":64,\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hello from smoke messages stream\"}]}" || echo "000")
+if [[ "$MSCODE" =~ ^2 ]] && grep -q "event: message_start" /tmp/gw_msg_stream.txt && grep -q "event: message_stop" /tmp/gw_msg_stream.txt; then
+  echo "PASS  POST /v1/messages stream (HTTP $MSCODE, message_start + message_stop)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  POST /v1/messages stream — HTTP $MSCODE or missing Anthropic SSE events"
+  echo "      body: $(head -c 500 /tmp/gw_msg_stream.txt 2>/dev/null || true)"
+  FAIL=$((FAIL + 1))
+fi
+
 echo "Results: $PASS passed, $FAIL failed"
 if [[ "$FAIL" -gt 0 ]]; then
   exit 1
