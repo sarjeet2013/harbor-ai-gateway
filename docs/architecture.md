@@ -1,6 +1,6 @@
 # Harbor AI Gateway — Architecture (v0)
 
-Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `edge/config.py`, `edge/main.py`, `edge/litellm_gen.py`, `edge/cache.py`).
+Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `edge/config.py`, `edge/main.py`, `edge/litellm_gen.py`, `edge/cache.py`, `edge/proxy.py`).
 
 ## Components
 
@@ -12,6 +12,7 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 6. **Ledger** — JSONL at `ledger_path` (default `logs/ledger.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields when implemented (`cache_hit`, `cache_kind`, `tokens_saved*`).
 7. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
 8. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
+   Non-stream only today: the edge buffers a full JSON body. **Streaming is planned** — see [features/streaming.md](features/streaming.md).
 9. **Config** — single canonical `config/gateway.yaml`. LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
 
 ## Surfaces (edge)
@@ -71,5 +72,6 @@ Same path for all clients once traffic hits the edge: clients → edge `:4000` �
 
 ## Planned (not yet shipped)
 
+- **Streaming (SSE)** — edge still buffers JSON; v1 = chat `stream: true` passthrough + ledger/budget on complete. See [features/streaming.md](features/streaming.md).
 - **Semantic cache** (embeddings + cosine threshold) — see [features/cache.md](features/cache.md).
 - **Intelligent / judge routing** — after cache; heuristic router remains the shipping path today.

@@ -46,7 +46,7 @@ Do not enable semantic expectations until this lands.
 ## Out of scope for this doc / next
 
 - **Intelligent (judge) routing** — planned **after** cache. Not built yet; Omnigent-style smart routing is a follow-on, not a substitute for tokens-saved cache.
-- Streaming responses — **not cached** until streaming support exists (`stream: true` bypasses cache).
+- Streaming responses — **not cached** (`stream: true` bypasses cache). Streaming passthrough itself is **planned** — see [streaming.md](streaming.md).
 - Multi-node / Redis shared cache.
 
 ## Storage
@@ -86,7 +86,7 @@ Example hit line (fields abbreviated):
 | --- | --- |
 | `ttl_seconds` | Entries older than TTL are dropped |
 | `max_entries` | FIFO eviction when full |
-| Streaming | `stream: true` → skip cache (do not store) |
+| Streaming | `stream: true` → skip cache (do not store); SSE passthrough planned — [streaming.md](streaming.md) |
 | Bypass header | `X-Cache-Bypass: 1` (or `true`) |
 | Cache-Control | `Cache-Control: no-cache` / `no-store` |
 | Body | `cache_control` string containing `no-cache`, or `cache_control: false` |
@@ -120,7 +120,7 @@ Default for local Mac testing: **`enabled: true`**, TTL 24h.
 - Unit: hash stability for equivalent normalized payloads; hit path returns same body and `tokens_saved > 0`.
 - Integration (mock): two identical `POST /v1/chat/completions` → second ledger line has `cache_hit: true`.
 - Bypass: `X-Cache-Bypass: 1` forces miss/store skip as configured.
-- Streaming: `"stream": true` never hits/stores.
+- Streaming: `"stream": true` never hits/stores (passthrough planned — [streaming.md](streaming.md)).
 
 ```bash
 # Mac / local

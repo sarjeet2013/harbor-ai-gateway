@@ -192,6 +192,8 @@ python -m edge cache-stats   # hit rate + tokens_saved from ledger
 
 Semantic cache and intelligent (judge) routing are **planned** (not shipped). Details: **[docs/features/cache.md](docs/features/cache.md)**.
 
+**Streaming** is also **planned** (edge buffers full JSON today; `stream: true` bypasses cache). v1 needs: SSE passthrough on chat, ledger/budget after the stream completes, smoke. Details: **[docs/features/streaming.md](docs/features/streaming.md)**.
+
 ## Client attach
 
 Copy-paste snippets live under `config/clients/`:
@@ -231,7 +233,7 @@ Logs: `logs/edge.log`, `logs/litellm.log`.
 
 **In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact response cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode for demos.
 
-**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned later:** semantic cache; intelligent/judge routing.
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned later:** streaming (SSE); semantic cache; intelligent/judge routing.
 
 ## Status
 
