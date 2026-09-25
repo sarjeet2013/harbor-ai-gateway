@@ -49,13 +49,23 @@ flowchart LR
 
 One config file (`config/gateway.yaml`) defines listen ports, budget, router, and model pools (including LiteLLM `litellm_model` + `api_base`). The CLI generates LiteLLM YAML and starts both processes.
 
+**Install once (required):**
+
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-# For real providers / Ollama:
-pip install 'litellm[proxy]'
+```
 
+**Optional** (real providers / Ollama — skip for mock mode):
+
+```bash
+pip install 'litellm[proxy]'
+```
+
+Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing).
+
+```bash
 # Check aliases that will be sent to LiteLLM (catches missing litellm_model)
 python -m edge config-check
 
@@ -65,6 +75,7 @@ python -m edge start
 # Or background
 python -m edge start --detach
 python -m edge status
+python -m edge cache-stats
 python -m edge stop
 ```
 

@@ -1,4 +1,4 @@
-"""CLI: python -m edge {start|stop|status|config-check|cache-stats}"""
+"""CLI: python -m edge {start|stop|status|config-check|cache-stats|doctor}"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .deps import ensure_deps, preflight_ok_message
 from .config import GatewayConfig, load_config, repo_root
 from .litellm_gen import resolved_aliases, write_litellm_config
 
@@ -223,6 +224,7 @@ def _free_port(port: int) -> None:
 
 
 def cmd_status(_args: argparse.Namespace | None = None) -> int:
+    ensure_deps()
     cfg = load_config()
     info = _read_pidfile() or {}
     edge_pid = int(info.get("edge_pid") or 0)
@@ -262,6 +264,7 @@ def cmd_status(_args: argparse.Namespace | None = None) -> int:
 
 
 def cmd_config_check(_args: argparse.Namespace | None = None) -> int:
+    ensure_deps()
     cfg = load_config()
     rows = resolved_aliases(cfg)
     print(f"config: upstream_mode={cfg.upstream_mode} listen={cfg.listen}")
@@ -290,6 +293,7 @@ def cmd_config_check(_args: argparse.Namespace | None = None) -> int:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
+    ensure_deps()
     cfg = load_config()
     _ensure_dirs()
     _warn_cloud_keys(cfg)
@@ -405,6 +409,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
     """Summarize cache hits / tokens_saved from why-log (+ disk entry count)."""
+    ensure_deps()
     cfg = load_config()
     why_path = Path(cfg.why_log_path)
     if not why_path.is_absolute():
@@ -462,6 +467,14 @@ def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
     return 0
 
 
+
+def cmd_doctor(_args: argparse.Namespace | None = None) -> int:
+    """Run dependency preflight only; print OK or missing modules."""
+    ensure_deps()
+    print(preflight_ok_message())
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m edge",
@@ -490,6 +503,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_p.set_defaults(func=cmd_config_check)
 
+    cache_p = sub.add_parser(
+        "cache-stats",
+        help="summarize cache hits / tokens_saved from why-log",
+    )
+    cache_p.set_defaults(func=cmd_cache_stats)
+
+    doctor_p = sub.add_parser(
+        "doctor",
+        aliases=["deps-check"],
+        help="verify required Python packages are installed",
+    )
+    doctor_p.set_defaults(func=cmd_doctor)
+
     return p
 
 
@@ -499,6 +525,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.command:
         parser.print_help()
         return 0
+    # Defense in depth when CLI is imported without going through __main__
+    if args.command in ("start", "status", "config-check", "cache-stats", "doctor", "deps-check"):
+        ensure_deps()
     return int(args.func(args))
 
 
