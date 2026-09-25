@@ -42,6 +42,14 @@ flowchart LR
 
 **Request path:** Client → edge → budget check → router → why-log → LiteLLM (or mock) → why-log complete → client.
 
+## Quick start (Ollama on Mac — real local models)
+
+See **[RUN_OLLAMA.md](RUN_OLLAMA.md)** for arm64 / ~8GB setup:
+
+- Pull `llama3.2:1b` (cheap) and `llama3.2:3b` (expensive)
+- `upstream_mode: litellm` with LiteLLM on `:4001` → Ollama `:11434`
+- Edge on `:4000`; smoke with curl + `logs/why.jsonl`
+
 ## Quick start (mock mode — no API keys)
 
 Mock upstream is the default in `config/gateway.yaml` (`upstream_mode: mock`). The edge returns echo completions so curl works offline.
