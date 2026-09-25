@@ -100,7 +100,7 @@ See **[RUN_OLLAMA.md](RUN_OLLAMA.md)** and **[docs/features/hybrid.md](docs/feat
 pip install -r requirements.txt -r requirements-litellm.txt
 ```
 
-Then pull `llama3.2:1b` and `python -m edge start`. Optional: `export OPENAI_API_KEY=...` for expensive OpenAI.
+Then pull `llama3.2:3b` and `python -m edge start`. Optional: `export OPENAI_API_KEY=...` for expensive OpenAI.
 
 ## Quick start (mock mode — no API keys / no LiteLLM)
 

@@ -23,7 +23,7 @@ cost_estimates_usd:
 models:
   cheap:
     - name: ollama-cheap
-      litellm_model: ollama_chat/llama3.2:1b
+      litellm_model: ollama_chat/llama3.2:3b
       api_base: http://127.0.0.1:11434
   expensive:
     # Hybrid: OpenAI. Default gpt-4o-mini (strong + cheaper than gpt-4o).

@@ -6,7 +6,7 @@
 
 | Pool | Alias | LiteLLM model | Needs key? |
 | --- | --- | --- | --- |
-| cheap | `ollama-cheap` | `ollama_chat/llama3.2:1b` + `api_base` Ollama | No |
+| cheap | `ollama-cheap` | `ollama_chat/llama3.2:3b` + `api_base` Ollama | No |
 | expensive | `openai-expensive` | `openai/gpt-4o-mini` | Yes — `OPENAI_API_KEY` |
 
 Default expensive id is `openai/gpt-4o-mini` (strong, lower cost than `gpt-4o`). Bump via `litellm_model: openai/gpt-4o` in `config/gateway.yaml`. See [LiteLLM OpenAI](https://docs.litellm.ai/docs/providers/openai).
@@ -42,7 +42,7 @@ Mock mode (`GATEWAY_CONFIG=config/gateway.mock.yaml`) always asserts expensive s
 
 ```bash
 cd ~/github/harbor-ai-gateway && source .venv/bin/activate
-ollama pull llama3.2:1b
+ollama pull llama3.2:3b
 # optional for OpenAI expensive:
 # export OPENAI_API_KEY=...   # from platform.openai.com — never commit
 python -m edge stop
