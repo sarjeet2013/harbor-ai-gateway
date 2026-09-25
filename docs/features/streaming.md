@@ -36,7 +36,7 @@ OpenAI-style SSE on `POST /v1/chat/completions` with `"stream": true` (Cursor / 
 
 ## Out of scope for this note
 
-Semantic cache. Judge routing. (Hybrid Ollama cheap + Grok expensive is shipped — see [hybrid.md](hybrid.md).)
+Semantic cache. Judge routing. (Hybrid Ollama cheap + OpenAI expensive is shipped — see [hybrid.md](hybrid.md).)
 
 ## Troubleshooting (Ollama stream)
 

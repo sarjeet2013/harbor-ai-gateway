@@ -1,15 +1,15 @@
 # Run Harbor AI Gateway with Ollama (Mac)
 
-**Hybrid default:** cheap = local Ollama (`llama3.2:1b`) · expensive = Grok (`xai/grok-3-mini`)  
-**Ports:** edge `:4000` → LiteLLM `:4001` → Ollama `:11434` (+ xAI cloud for expensive)  
+**Hybrid default:** cheap = local Ollama (`llama3.2:1b`) · expensive = OpenAI (`openai/gpt-4o-mini`)  
+**Ports:** edge `:4000` → LiteLLM `:4001` → Ollama `:11434` (+ OpenAI cloud for expensive)  
 **Config:** edit **only** `config/gateway.yaml` (models carry `litellm_model` + optional `api_base`)  
-**Keys:** everyday Ollama needs **no** cloud key. For expensive/heuristic Grok: `export XAI_API_KEY=...`  
+**Keys:** everyday Ollama needs **no** cloud key. For expensive/heuristic OpenAI: `export OPENAI_API_KEY=...`  
 Details: **[docs/features/hybrid.md](docs/features/hybrid.md)**.
 
 ## One-time setup
 
 ```bash
-# Pull cheap model (~1 GB on arm64). Expensive Grok is cloud — no ollama pull needed for it.
+# Pull cheap model (~1 GB on arm64). Expensive OpenAI is cloud — no ollama pull needed for it.
 ollama pull llama3.2:1b
 # Optional if you switch expensive back to all-Ollama (see commented block in gateway.yaml):
 # ollama pull llama3.2:3b
@@ -36,9 +36,9 @@ models:
       litellm_model: ollama_chat/llama3.2:1b
       api_base: http://127.0.0.1:11434
   expensive:
-    - name: grok-expensive
-      litellm_model: xai/grok-3-mini
-      # litellm_gen sets api_key: os.environ/XAI_API_KEY
+    - name: openai-expensive
+      litellm_model: openai/gpt-4o-mini
+      # litellm_gen sets api_key: os.environ/OPENAI_API_KEY
 ```
 
 **Do not edit `config/litellm_config.yaml`.** The CLI generates `config/.generated_litellm.yaml` (override path with `GATEWAY_LITELLM_CONFIG`).
@@ -46,7 +46,7 @@ models:
 ### Cloud API keys
 
 - **Ollama** does not need `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. If those are set while all models are `ollama/*` or `ollama_chat/*`, the CLI prints a warning — ignore or unset.
-- **Grok / xAI** (default expensive): `export XAI_API_KEY=...` (see [console.x.ai](https://console.x.ai)). Without it, `python -m edge start` warns but still starts; cheap/Ollama works; expensive requests fail until the key is set. Never commit the key — use shell env or `.env` (gitignored).
+- **OpenAI** (default expensive): `export OPENAI_API_KEY=...` (see [platform.openai.com](https://platform.openai.com)). Without it, `python -m edge start` warns but still starts; cheap/Ollama works; expensive requests fail until the key is set. Never commit the key — use shell env or `.env` (gitignored). Optional Grok: set `xai/…` in YAML + `XAI_API_KEY` (API access required; SuperGrok alone is not enough).
 
 ## Start / stop (one command)
 
@@ -54,9 +54,9 @@ models:
 cd ~/harbor-ai-gateway && source .venv/bin/activate
 
 # Optional for hybrid expensive:
-# export XAI_API_KEY=...
+# export OPENAI_API_KEY=...
 
-# Sanity: aliases must include ollama-cheap / grok-expensive
+# Sanity: aliases must include ollama-cheap / openai-expensive
 python -m edge config-check
 
 # Stop any old manual uvicorn/litellm you had on :4000/:4001
@@ -78,13 +78,13 @@ python -m edge stop
 # Health
 curl -s http://127.0.0.1:4000/healthz
 
-# Cheap path (default) — works without XAI_API_KEY
+# Cheap path (default) — works without OPENAI_API_KEY
 curl -s http://127.0.0.1:4000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"ollama-cheap","messages":[{"role":"user","content":"Say hi in one short sentence."}],"max_tokens":64}'
 
-# Expensive path (keyword trigger). Needs XAI_API_KEY for a real Grok completion.
-# "auto" is not a registered alias — the router picks grok-expensive from gateway.yaml.
+# Expensive path (keyword trigger). Needs OPENAI_API_KEY for a real OpenAI completion.
+# "auto" is not a registered alias — the router picks openai-expensive from gateway.yaml.
 curl -s http://127.0.0.1:4000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"auto","messages":[{"role":"user","content":"Please refactor this architecture and design a system."}],"max_tokens":64}'
@@ -101,7 +101,7 @@ curl -s http://127.0.0.1:4000/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{"model":"ollama-cheap","input":"Say hi in one short sentence."}'
 
-# Full smoke (cheap+stream always; expensive soft-SKIPs without XAI_API_KEY)
+# Full smoke (cheap+stream always; expensive soft-SKIPs without OPENAI_API_KEY)
 ./scripts/smoke.sh
 
 # Ledger

@@ -22,9 +22,12 @@ def _params_for(spec: ModelSpec) -> dict[str, Any] | None:
         params["api_base"] = spec.api_base
     if spec.extra_litellm_params:
         params.update(spec.extra_litellm_params)
-    # xAI / Grok: LiteLLM reads XAI_API_KEY via the os.environ/KEY form unless overridden.
-    if spec.litellm_model.startswith("xai/") and "api_key" not in params:
-        params["api_key"] = "os.environ/XAI_API_KEY"
+    # Cloud providers: inject os.environ/KEY unless caller overrode api_key.
+    if "api_key" not in params:
+        if spec.litellm_model.startswith("openai/"):
+            params["api_key"] = "os.environ/OPENAI_API_KEY"
+        elif spec.litellm_model.startswith("xai/"):
+            params["api_key"] = "os.environ/XAI_API_KEY"
     return params
 
 

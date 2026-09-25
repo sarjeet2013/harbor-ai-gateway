@@ -12,7 +12,7 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 6. **Ledger** — JSONL at `ledger_path` (default `logs/ledger.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields when implemented (`cache_hit`, `cache_kind`, `tokens_saved*`).
 7. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
 8. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
-   Default pools are **hybrid**: Ollama cheap + Grok (xAI) expensive — see [features/hybrid.md](features/hybrid.md).
+   Default pools are **hybrid**: Ollama cheap + OpenAI expensive — see [features/hybrid.md](features/hybrid.md).
    Chat **streaming** (`stream: true` on `/v1/chat/completions`) is SSE passthrough; other surfaces return 501 for `stream: true`. See [features/streaming.md](features/streaming.md).
 9. **Config** — single canonical `config/gateway.yaml`. LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
 
@@ -57,7 +57,7 @@ flowchart LR
   end
 
   LITELLM["(CLI-managed) LiteLLM :4001"]
-  UP[(Ollama / xAI Grok)]
+  UP[(Ollama / OpenAI)]
 
   CURL -->|OpenAI /v1| BUDGET
   CURSOR -->|HTTPS tunnel + /cursor| BUDGET

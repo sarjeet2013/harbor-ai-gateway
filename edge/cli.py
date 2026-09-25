@@ -80,7 +80,15 @@ def _warn_cloud_keys(cfg: GatewayConfig) -> None:
     if not specs:
         return
     with_model = [s for s in specs if s.litellm_model]
-    # Warn (do not fail start) when any xai/* model and XAI_API_KEY unset.
+    # Warn (do not fail start) when cloud models lack their env keys.
+    if any((s.litellm_model or "").startswith("openai/") for s in with_model):
+        if not os.environ.get("OPENAI_API_KEY"):
+            print(
+                "warning: OPENAI_API_KEY is unset but config has openai/* model(s) — "
+                "cheap/Ollama still works; expensive/OpenAI requests will fail until "
+                "you export OPENAI_API_KEY.",
+                file=sys.stderr,
+            )
     if any((s.litellm_model or "").startswith("xai/") for s in with_model):
         if not os.environ.get("XAI_API_KEY"):
             print(

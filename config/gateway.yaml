@@ -1,7 +1,7 @@
 # Canonical config — edit models here only. CLI generates LiteLLM YAML from this.
-# Hybrid default: cheap = local Ollama, expensive = Grok (xAI).
-# Everyday Ollama works without XAI_API_KEY; export XAI_API_KEY for expensive/heuristic Grok.
-# Ollama e2e on Mac: edge :4000 → LiteLLM :4001 → Ollama :11434 (+ xAI cloud for expensive)
+# Hybrid default: cheap = local Ollama, expensive = OpenAI.
+# Everyday Ollama works without OPENAI_API_KEY; export OPENAI_API_KEY for expensive/heuristic.
+# Ollama e2e on Mac: edge :4000 → LiteLLM :4001 → Ollama :11434 (+ OpenAI cloud for expensive)
 listen: "0.0.0.0:4000"
 litellm_host: "127.0.0.1"
 litellm_port: 4001          # managed internal; `python -m edge start` launches it
@@ -13,7 +13,7 @@ budget_state_path: "data/budget.json"
 
 ledger_path: "logs/ledger.jsonl"
 
-# Rough USD estimates for budget accounting (Ollama cheap is free; Grok expensive is paid)
+# Rough USD estimates for budget accounting (Ollama cheap is free; OpenAI expensive is paid)
 cost_estimates_usd:
   cheap_per_request: 0.0
   expensive_per_request: 0.02
@@ -24,16 +24,19 @@ models:
       litellm_model: ollama_chat/llama3.2:1b
       api_base: http://127.0.0.1:11434
   expensive:
-    # Hybrid: Grok via xAI. Prefer mid-tier grok-3-mini (widely available).
-    # To bump later: litellm_model: xai/grok-4.x (or xai/grok-2-latest as fallback).
-    # Requires: export XAI_API_KEY=...  (LiteLLM reads os.environ/XAI_API_KEY)
-    - name: grok-expensive
-      litellm_model: xai/grok-3-mini
-      # no api_base — xAI cloud; api_key injected as os.environ/XAI_API_KEY by litellm_gen
+    # Hybrid: OpenAI. Default gpt-4o-mini (strong + cheaper than gpt-4o).
+    # To bump: litellm_model: openai/gpt-4o
+    # Requires: export OPENAI_API_KEY=...  (LiteLLM reads os.environ/OPENAI_API_KEY)
+    - name: openai-expensive
+      litellm_model: openai/gpt-4o-mini
+      # no api_base — OpenAI cloud; api_key injected as os.environ/OPENAI_API_KEY by litellm_gen
       # optional explicit override:
       # extra_litellm_params:
-      #   api_key: os.environ/XAI_API_KEY
-    # Optional all-Ollama expensive (no cloud key) — comment out grok block above and uncomment:
+      #   api_key: os.environ/OPENAI_API_KEY
+    # Optional Grok (xAI) instead — needs XAI_API_KEY (API access, not SuperGrok alone):
+    # - name: grok-expensive
+    #   litellm_model: xai/grok-3-mini
+    # Optional all-Ollama expensive (no cloud key) — comment out openai block above and uncomment:
     # - name: ollama-expensive
     #   litellm_model: ollama_chat/llama3.2:3b
     #   api_base: http://127.0.0.1:11434

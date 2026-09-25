@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke-test OpenAI chat, Anthropic messages, and OpenAI responses against the edge.
-# Works with default hybrid Ollama+Grok/LiteLLM (config/gateway.yaml) and mock mode.
-# Cheap + stream pass without XAI_API_KEY; expensive completion soft-SKIPs unless key set.
+# Works with default hybrid Ollama+OpenAI/LiteLLM (config/gateway.yaml) and mock mode.
+# Cheap + stream pass without OPENAI_API_KEY; expensive completion soft-SKIPs unless key set.
 #   python -m edge start && ./scripts/smoke.sh
 #   GATEWAY_CONFIG=config/gateway.mock.yaml python -m edge start && ./scripts/smoke.sh
 set -euo pipefail
@@ -118,10 +118,10 @@ ECODE=$(curl -s -o /tmp/gw_exp.json -w "%{http_code}" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-local-gateway" \
   -d '{"model":"ignored","messages":[{"role":"user","content":"please refactor the architecture"}]}' || echo "000")
-# Hybrid default: expensive = xAI Grok. Without XAI_API_KEY, upstream completion fails —
+# Hybrid default: expensive = OpenAI. Without OPENAI_API_KEY, upstream completion fails —
 # soft-SKIP success assertion so everyday Ollama smoke still passes. With key set, assert.
-if [[ "$MODE" != "mock" && -z "${XAI_API_KEY:-}" ]]; then
-  echo "SKIP  expensive heuristic chat — XAI_API_KEY unset (hybrid Grok; cheap/stream still required)"
+if [[ "$MODE" != "mock" && -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "SKIP  expensive heuristic chat — OPENAI_API_KEY unset (hybrid OpenAI; cheap/stream still required)"
   echo "      HTTP $ECODE body: $(head -c 200 /tmp/gw_exp.json 2>/dev/null || true)"
 else
   py_check "expensive heuristic chat" "$ECODE" /tmp/gw_exp.json "$EXP_ASSERT"
