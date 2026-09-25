@@ -2,8 +2,8 @@
 # Not required for mock mode. Install with core deps:
 #   pip install -r requirements.txt -r requirements-litellm.txt
 #
-# Pin: older litellm used a broken Ollama async-stream path
-# (async_generator / async_get_ollama_response_stream). >=1.72 uses
-# httpx streaming; pair with pydantic==2.12.5 in requirements.txt.
-litellm[proxy]>=1.72.0,<2
+# Older litellm used a broken Ollama async-stream path
+# (async_generator / async_get_ollama_response_stream). >=1.72 uses httpx streaming.
+# Keep uvicorn/pydantic pins in requirements.txt aligned with litellm[proxy].
+litellm[proxy]>=1.72.0,<1.80
 async_generator>=1.10  # transitive safety for any remaining async helpers

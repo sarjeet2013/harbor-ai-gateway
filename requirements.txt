@@ -1,10 +1,12 @@
 # Runtime deps for the Harbor edge (keep in sync with edge/deps.py REQUIRED_IMPORTS).
 # When you add a new third-party import under edge/, add it here AND to edge/deps.py.
+#
+# Pins must jointly resolve with requirements-litellm.txt:
+#   litellm[proxy] requires pydantic==2.12.5 and uvicorn>=0.29,<0.30
 fastapi==0.115.6
-uvicorn[standard]==0.34.0
+uvicorn[standard]==0.29.0
 httpx==0.28.1
 pyyaml==6.0.2
-# litellm[proxy] >=1.72 pins pydantic==2.12.5; keep edge aligned so joint install resolves.
 pydantic==2.12.5
 
 # Optional — only for upstream_mode: litellm (real providers / Ollama).
