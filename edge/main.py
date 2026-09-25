@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .budget import DayBudget
-from .cache import ResponseCache, should_bypass_cache
+from .cache import ResponseCache, cheap_pool_embedding_api_base, should_bypass_cache
 from .config import GatewayConfig, load_config
 from .mock_upstream import (
     mock_anthropic_message,
@@ -71,7 +71,10 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     budget = DayBudget(config)
     ledger = Ledger(config.ledger_path)
     proxy = LiteLLMProxy(config.litellm_base_url)
-    cache = ResponseCache(config.cache)
+    cache = ResponseCache(
+        config.cache,
+        default_embedding_api_base=cheap_pool_embedding_api_base(config.models.cheap),
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

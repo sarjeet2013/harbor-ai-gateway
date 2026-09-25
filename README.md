@@ -1,6 +1,6 @@
 # Harbor AI Gateway
 
-**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, **exact response cache** (tokens saved), and a **ledger** on every request.
+**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, **exact + semantic response cache** (tokens saved), and a **ledger** on every request.
 
 Goal: usable on one machine, something to build on — not an enterprise control plane.
 
@@ -187,15 +187,15 @@ curl -s http://127.0.0.1:4000/v1/responses \
 - **Ledger**: JSONL at `logs/ledger.jsonl` — each line has `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`, plus `cache_hit` / `cache_kind` / `tokens_saved*`.
 
 
-## Cache (shipping: exact)
+## Cache (shipping: exact + semantic)
 
-Exact response cache on local disk (`data/cache/`) — **enabled by default** in `config/gateway.yaml` (`cache.enabled: true`, TTL 24h). Hits skip upstream and do **not** charge the day budget; ledger records `cache_hit`, `cache_kind`, and `tokens_saved*`.
+Response cache on local disk (`data/cache/`) — **enabled by default** in `config/gateway.yaml` (`cache.enabled: true`, TTL 24h). Default live mode is **`exact`**; set `mode: semantic` after pulling `nomic-embed-text` (or similar) on Ollama. Semantic is **exact-first**, then cosine similarity on embeddings (threshold default `0.92`); embed failures soft-fail to miss. Hits skip upstream and do **not** charge the day budget; ledger records `cache_hit`, `cache_kind` (`exact` | `semantic` | `none`), and `tokens_saved*`.
 
 ```bash
 python -m edge cache-stats   # hit rate + tokens_saved from ledger
 ```
 
-Semantic cache and intelligent (judge) routing are **planned** (not shipped). Details: **[docs/features/cache.md](docs/features/cache.md)**.
+Intelligent (judge) routing remains **planned**. Details: **[docs/features/cache.md](docs/features/cache.md)**.
 
 **Streaming (v1 chat):** `POST /v1/chat/completions` with `"stream": true` returns SSE (`text/event-stream`); cache is bypassed; ledger + budget update once after the stream completes. Messages/Responses streaming still planned (501 if `stream: true`). Details: **[docs/features/streaming.md](docs/features/streaming.md)**.
 
@@ -240,9 +240,9 @@ Logs: `logs/edge.log`, `logs/litellm.log`.
 
 ## v0 scope
 
-**In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact response cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode for demos.
+**In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact + semantic response cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode for demos.
 
-**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **In (streaming):** chat SSE passthrough. **Planned later:** Messages/Responses SSE; semantic cache; intelligent/judge routing.
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **In (streaming):** chat SSE passthrough. **Planned later:** Responses SSE (where still 501); intelligent/judge routing.
 
 ## Status
 

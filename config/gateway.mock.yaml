@@ -32,11 +32,13 @@ router:
     - "write a detailed"
   expensive_min_chars: 2000
 
-# Exact response cache (semantic mode planned — see docs/features/cache.md)
+# Response cache (exact for mock; semantic needs Ollama embeddings — see docs/features/cache.md)
 cache:
   enabled: true
-  mode: exact   # exact | semantic (semantic planned)
+  mode: exact   # exact | semantic
   ttl_seconds: 86400
   max_entries: 1000
   path: data/cache
-  # semantic later: embedding_model, similarity_threshold
+  # semantic: embedding_model: nomic-embed-text
+  # semantic: embedding_api_base: http://127.0.0.1:11434
+  # semantic: similarity_threshold: 0.92

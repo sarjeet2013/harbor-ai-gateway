@@ -4,11 +4,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
+
 from fastapi.testclient import TestClient
 
 from edge.cache import (
     ResponseCache,
     cache_key_hash,
+    cacheable_text,
+    cosine_similarity,
     normalize_for_hash,
     should_bypass_cache,
 )
@@ -149,3 +153,214 @@ def test_bypass_header_skips_hit(tmp_path: Path):
     assert r2.status_code == 200
     hit_line = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
     assert hit_line["cache_hit"] is False
+
+
+# --- Semantic cache (v2) ---
+
+
+def test_cosine_similarity_identical_and_orthogonal():
+    assert cosine_similarity([1.0, 0.0], [1.0, 0.0]) == 1.0
+    assert abs(cosine_similarity([1.0, 0.0], [0.0, 1.0])) < 1e-9
+    assert cosine_similarity([1.0, 2.0], [1.0, 2.0, 3.0]) == 0.0
+    assert cosine_similarity([], [1.0]) == 0.0
+
+
+def test_cacheable_text_skips_tools_noise():
+    body = {
+        "messages": [{"role": "user", "content": "hello world"}],
+        "system": "be brief",
+        "tools": [{"type": "function", "function": {"name": "x", "parameters": {"a": 1}}}],
+        "temperature": 0.1,
+    }
+    text = cacheable_text(body)
+    assert "hello world" in text
+    assert "be brief" in text
+    assert "function" not in text
+    assert "parameters" not in text
+
+
+class _FakeEmbedTransport(httpx.BaseTransport):
+    """Minimal httpx transport: /api/embeddings returns a vector keyed by prompt text."""
+
+    def __init__(self, vectors: dict[str, list[float]], *, fail: bool = False):
+        self.vectors = vectors
+        self.fail = fail
+        self.calls: list[str] = []
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(str(request.url))
+        if self.fail:
+            return httpx.Response(503, json={"error": "down"})
+        if request.url.path.endswith("/api/embeddings"):
+            payload = json.loads(request.content.decode())
+            prompt = payload.get("prompt") or ""
+            # Map unknown prompts to a near-orthogonal default
+            vec = self.vectors.get(prompt)
+            if vec is None:
+                # Deterministic tiny hash → mostly dissimilar
+                h = sum(ord(c) for c in prompt) % 97
+                vec = [float(h), 1.0, 0.0]
+            return httpx.Response(200, json={"embedding": vec})
+        return httpx.Response(404, json={"error": "not found"})
+
+
+def _semantic_cfg(tmp_path: Path, **kwargs) -> CacheConfig:
+    base = dict(
+        enabled=True,
+        mode="semantic",
+        ttl_seconds=3600,
+        max_entries=50,
+        path=str(tmp_path),
+        embedding_model="nomic-embed-text",
+        embedding_api_base="http://embed.test",
+        similarity_threshold=0.92,
+    )
+    base.update(kwargs)
+    return CacheConfig(**base)
+
+
+def test_semantic_hit_when_vectors_similar(tmp_path: Path):
+    # Same vector for paraphrases → cosine 1.0 ≥ 0.92
+    shared = [0.9, 0.1, 0.2]
+    transport = _FakeEmbedTransport(
+        {
+            "user: how do I reset my password": shared,
+            "user: what's the way to reset a password": shared,
+        }
+    )
+    client = httpx.Client(transport=transport)
+    cache = ResponseCache(_semantic_cfg(tmp_path), http_client=client)
+    body1 = {"messages": [{"role": "user", "content": "how do I reset my password"}]}
+    body2 = {"messages": [{"role": "user", "content": "what's the way to reset a password"}]}
+    resp = {
+        "id": "cached-1",
+        "choices": [{"message": {"role": "assistant", "content": "Use the reset link."}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
+    cache.set(body1, model="mock-cheap", pool="cheap", surface="chat", response=resp)
+    hit = cache.get(body2, model="mock-cheap", pool="cheap", surface="chat")
+    assert hit is not None
+    assert hit.kind == "semantic"
+    assert hit.body["id"] == "cached-1"
+    assert hit.tokens_saved == 15
+    assert transport.calls  # embed was invoked
+
+
+def test_exact_preferred_over_semantic(tmp_path: Path):
+    shared = [1.0, 0.0, 0.0]
+    transport = _FakeEmbedTransport({"user: same prompt": shared})
+    client = httpx.Client(transport=transport)
+    cache = ResponseCache(_semantic_cfg(tmp_path), http_client=client)
+    body = {"messages": [{"role": "user", "content": "same prompt"}]}
+    resp = {
+        "id": "exact-body",
+        "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+    }
+    cache.set(body, model="mock-cheap", pool="cheap", surface="chat", response=resp)
+    calls_before = len(transport.calls)
+    hit = cache.get(body, model="mock-cheap", pool="cheap", surface="chat")
+    assert hit is not None
+    assert hit.kind == "exact"
+    # Exact hit must not call embed
+    assert len(transport.calls) == calls_before
+
+
+def test_semantic_threshold_miss(tmp_path: Path):
+    transport = _FakeEmbedTransport(
+        {
+            "user: cats": [1.0, 0.0, 0.0],
+            "user: quantum chromodynamics proofs": [0.0, 1.0, 0.0],
+        }
+    )
+    client = httpx.Client(transport=transport)
+    cache = ResponseCache(
+        _semantic_cfg(tmp_path, similarity_threshold=0.92),
+        http_client=client,
+    )
+    body1 = {"messages": [{"role": "user", "content": "cats"}]}
+    body2 = {"messages": [{"role": "user", "content": "quantum chromodynamics proofs"}]}
+    resp = {
+        "id": "a",
+        "choices": [{"message": {"role": "assistant", "content": "meow"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    cache.set(body1, model="mock-cheap", pool="cheap", surface="chat", response=resp)
+    hit = cache.get(body2, model="mock-cheap", pool="cheap", surface="chat")
+    assert hit is None
+
+
+def test_embed_failure_soft_miss_and_store_without_embedding(tmp_path: Path):
+    transport = _FakeEmbedTransport({}, fail=True)
+    client = httpx.Client(transport=transport)
+    cache = ResponseCache(_semantic_cfg(tmp_path), http_client=client)
+    body = {"messages": [{"role": "user", "content": "soft fail please"}]}
+    resp = {
+        "id": "stored",
+        "choices": [{"message": {"role": "assistant", "content": "x"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    key = cache.set(body, model="mock-cheap", pool="cheap", surface="chat", response=resp)
+    assert key is not None
+    entry = json.loads((tmp_path / f"{key}.json").read_text())
+    assert "embedding" not in entry
+    # get: exact would hit; use different text so only semantic could match → soft miss
+    body2 = {"messages": [{"role": "user", "content": "different text entirely"}]}
+    assert cache.get(body2, model="mock-cheap", pool="cheap", surface="chat") is None
+
+
+def test_mode_exact_never_calls_embed(tmp_path: Path):
+    transport = _FakeEmbedTransport({"user: hi": [1.0, 0.0]})
+    client = httpx.Client(transport=transport)
+    cfg = CacheConfig(
+        enabled=True,
+        mode="exact",
+        ttl_seconds=3600,
+        max_entries=10,
+        path=str(tmp_path),
+        embedding_model="nomic-embed-text",
+        embedding_api_base="http://embed.test",
+    )
+    cache = ResponseCache(cfg, http_client=client)
+    body = {"messages": [{"role": "user", "content": "hi"}]}
+    resp = {
+        "id": "e",
+        "choices": [{"message": {"role": "assistant", "content": "yo"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    cache.set(body, model="mock-cheap", pool="cheap", surface="chat", response=resp)
+    # Different text → exact miss; semantic would embed, but mode=exact must not
+    other = {"messages": [{"role": "user", "content": "other"}]}
+    assert cache.get(other, model="mock-cheap", pool="cheap", surface="chat") is None
+    assert transport.calls == []
+
+
+def test_semantic_skips_different_sampling(tmp_path: Path):
+    shared = [0.5, 0.5, 0.0]
+    transport = _FakeEmbedTransport(
+        {
+            "user: same question": shared,
+        }
+    )
+    # Make both prompts map to same vector via defaulting — use identical contentable text
+    # but different temperature so sampling filter skips.
+    client = httpx.Client(transport=transport)
+    cache = ResponseCache(_semantic_cfg(tmp_path), http_client=client)
+    body1 = {
+        "messages": [{"role": "user", "content": "same question"}],
+        "temperature": 0.0,
+    }
+    body2 = {
+        "messages": [{"role": "user", "content": "same question"}],
+        "temperature": 0.9,
+    }
+    # Different temperature → different exact keys; same cacheable text → would be semantic
+    # hit without sampling filter.
+    resp = {
+        "id": "t0",
+        "choices": [{"message": {"role": "assistant", "content": "a"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    cache.set(body1, model="mock-cheap", pool="cheap", surface="chat", response=resp)
+    hit = cache.get(body2, model="mock-cheap", pool="cheap", surface="chat")
+    assert hit is None

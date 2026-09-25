@@ -55,11 +55,13 @@ router:
   # Prefer expensive if estimated prompt chars exceed this
   expensive_min_chars: 2000
 
-# Exact response cache (semantic mode planned — see docs/features/cache.md)
+# Response cache (exact shipping; set mode: semantic after nomic-embed-text on Mini)
 cache:
   enabled: true
-  mode: exact   # exact | semantic (semantic planned)
+  mode: exact   # exact | semantic (keep exact until embed model verified)
   ttl_seconds: 86400
   max_entries: 1000
   path: data/cache
-  # semantic later: embedding_model, similarity_threshold
+  embedding_model: nomic-embed-text
+  # embedding_api_base: http://192.168.4.31:11434  # default: cheap pool api_base
+  similarity_threshold: 0.92

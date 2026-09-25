@@ -78,16 +78,17 @@ class CostEstimates(BaseModel):
 
 
 class CacheConfig(BaseModel):
-    """Exact response cache (semantic mode planned — see docs/features/cache.md)."""
+    """Exact + semantic response cache (see docs/features/cache.md)."""
 
     enabled: bool = True
-    mode: str = "exact"  # exact | semantic (semantic planned; falls back to exact hashing)
+    mode: str = "exact"  # exact | semantic (semantic: exact-first, then cosine on embeddings)
     ttl_seconds: int = 86400
     max_entries: int = 1000
     path: str = "data/cache"
-    # Planned (not used yet):
-    embedding_model: str | None = None
-    similarity_threshold: float | None = None
+    # Semantic (used when mode: semantic) — Ollama /api/embeddings via httpx
+    embedding_model: str | None = None  # e.g. nomic-embed-text
+    embedding_api_base: str | None = None  # default: cheap pool api_base, else 127.0.0.1:11434
+    similarity_threshold: float = 0.92
 
 
 class GatewayConfig(BaseModel):

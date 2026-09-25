@@ -8,7 +8,7 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 2. **Edge (ours)** — FastAPI on `:4000` (`listen`); budget → router → **cache** → ledger before upstream. Started by `python -m edge start`. Cache hits **skip upstream**.
 3. **Day budget** — spend-so-far vs `daily_budget_usd`; over budget → `on_budget_exceeded` (`force_cheap` | `reject`). Persisted to `budget_state_path` (default `data/budget.json`). Pure cache hits do **not** increment spend.
 4. **Heuristic router** — classify request; pick from `models.cheap` / `models.expensive` pools (alias = each entry’s `name`).
-5. **Response cache** — exact hash cache on disk (`data/cache/`); see [features/cache.md](features/cache.md). **Semantic cache** and **intelligent (judge) routing** are **planned after exact cache** (not built yet).
+5. **Response cache** — exact + optional semantic cache on disk (`data/cache/`); see [features/cache.md](features/cache.md). Semantic = exact-first then Ollama embeddings + cosine threshold. **Intelligent (judge) routing** is still planned.
 6. **Ledger** — JSONL at `ledger_path` (default `logs/ledger.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields when implemented (`cache_hit`, `cache_kind`, `tokens_saved*`).
 7. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
 8. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
@@ -73,6 +73,5 @@ Same path for all clients once traffic hits the edge: clients → edge `:4000` �
 
 ## Planned (not yet shipped)
 
-- **Messages / Responses streaming** — chat SSE is shipped; Anthropic `/v1/messages` and OpenAI `/v1/responses` with `stream: true` still return 501. See [features/streaming.md](features/streaming.md).
-- **Semantic cache** (embeddings + cosine threshold) — see [features/cache.md](features/cache.md).
+- **Responses streaming** — chat + Anthropic messages SSE ship where implemented; OpenAI `/v1/responses` with `stream: true` may still return 501. See [features/streaming.md](features/streaming.md).
 - **Intelligent / judge routing** — after cache; heuristic router remains the shipping path today.

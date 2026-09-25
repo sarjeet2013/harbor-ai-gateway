@@ -570,12 +570,19 @@ def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
                 except (TypeError, ValueError):
                     pass
 
-    from .cache import ResponseCache
+    from .cache import ResponseCache, cheap_pool_embedding_api_base
 
-    disk = ResponseCache(cfg.cache).stats()
+    disk = ResponseCache(
+        cfg.cache,
+        default_embedding_api_base=cheap_pool_embedding_api_base(cfg.models.cheap),
+    ).stats()
     hit_rate = (hits / total) if total else 0.0
     print(f"cache.enabled:     {cfg.cache.enabled}")
     print(f"cache.mode:        {cfg.cache.mode}")
+    if cfg.cache.mode == "semantic":
+        print(f"embedding_model:   {cfg.cache.embedding_model}")
+        print(f"similarity_thr:    {cfg.cache.similarity_threshold}")
+        print(f"embed_entries:     {disk.get('entries_with_embedding', 0)}")
     print(f"cache.path:        {disk['path']}")
     print(f"disk.entries:      {disk['entries']} / {disk['max_entries']}")
     print(f"ledger:            {ledger_file}")
