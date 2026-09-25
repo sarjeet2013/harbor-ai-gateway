@@ -1,4 +1,4 @@
-# Run local-llm-gateway with Ollama (Mac)
+# Run Harbor AI Gateway with Ollama (Mac)
 
 **Models:** `llama3.2:1b` (cheap) · `llama3.2:3b` (expensive)  
 **Ports:** edge `:4000` → LiteLLM `:4001` → Ollama `:11434`  

@@ -1,6 +1,6 @@
-# local-llm-gateway
+# Harbor AI Gateway
 
-Personal **local** gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, and a **why-log** on every request.
+**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, and a **why-log** on every request.
 
 Goal: usable on one machine, something to build on — not an enterprise control plane.
 

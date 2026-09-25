@@ -405,7 +405,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m edge",
-        description="local-llm-gateway CLI — manage edge (+ LiteLLM) from one config",
+        description="Harbor AI Gateway CLI — manage edge (+ LiteLLM) from one config",
     )
     sub = p.add_subparsers(dest="command")
 

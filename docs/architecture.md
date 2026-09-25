@@ -1,4 +1,4 @@
-# Architecture (v0)
+# Harbor AI Gateway — Architecture (v0)
 
 Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `edge/config.py`, `edge/main.py`, `edge/litellm_gen.py`).
 

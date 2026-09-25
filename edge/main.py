@@ -31,7 +31,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     async def lifespan(_app: FastAPI):
         yield
 
-    app = FastAPI(title="local-llm-gateway", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Harbor AI Gateway", version="0.1.0", lifespan=lifespan)
     app.state.config = config
     app.state.budget = budget
     app.state.why = why
