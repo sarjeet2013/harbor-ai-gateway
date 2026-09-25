@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .budget import DayBudget
 from .cache import ResponseCache, should_bypass_cache
 from .config import GatewayConfig, load_config
-from .mock_upstream import mock_anthropic_message, mock_chat_completion, mock_responses
+from .mock_upstream import (
+    mock_anthropic_message,
+    mock_chat_completion,
+    mock_chat_completion_stream,
+    mock_responses,
+)
 from .proxy import LiteLLMProxy
 from .router import pick_model
 from .translate import (
@@ -20,6 +27,39 @@ from .translate import (
     responses_to_chat,
 )
 from .ledger import Ledger
+
+# Surfaces that support streaming in v1
+_CHAT_SURFACE = "openai.chat.completions"
+
+
+def _parse_usage_from_sse(raw: bytes) -> dict[str, Any]:
+    """Best-effort: last SSE data JSON object that carries a usage field."""
+    usage: dict[str, Any] = {}
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return usage
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            obj = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("usage"), dict):
+            usage = obj["usage"]
+    return usage
+
+
+def _tokens_from_usage(usage: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "prompt": usage.get("prompt_tokens") or usage.get("input_tokens"),
+        "completion": usage.get("completion_tokens") or usage.get("output_tokens"),
+        "total": usage.get("total_tokens"),
+    }
 
 
 def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
@@ -51,6 +91,107 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     @app.get("/v1/budget")
     async def get_budget() -> dict[str, Any]:
         return budget.snapshot()
+
+    async def _handle_stream(
+        *,
+        body: dict[str, Any],
+        surface: str,
+        path: str,
+        headers: dict[str, str],
+        decision: Any,
+        client_model: Any,
+        est: float,
+    ) -> Response:
+        """SSE passthrough for OpenAI chat completions (v1). Ledger/budget once after complete."""
+
+        async def _tee_and_record(
+            chunks: AsyncIterator[bytes] | Iterator[bytes],
+        ) -> AsyncIterator[bytes]:
+            collected = bytearray()
+            status = "ok"
+            status_code = 200
+            try:
+                if hasattr(chunks, "__anext__"):
+                    async for chunk in chunks:  # type: ignore[union-attr]
+                        collected.extend(chunk)
+                        yield chunk
+                else:
+                    for chunk in chunks:  # type: ignore[union-attr]
+                        collected.extend(chunk)
+                        yield chunk
+            except Exception:
+                status = "upstream_error"
+                status_code = 502
+                raise
+            finally:
+                usage = _parse_usage_from_sse(bytes(collected))
+                tokens = _tokens_from_usage(usage) if usage else {}
+                cost = est
+                if status == "ok":
+                    budget.record(cost)
+                ledger.write(
+                    {
+                        "surface": surface,
+                        "model": decision.model,
+                        "pool": decision.pool,
+                        "reason": decision.reason,
+                        "client_model": client_model,
+                        "status": status,
+                        "status_code": status_code,
+                        "tokens": tokens,
+                        "cost_usd": cost,
+                        "spent_usd": budget.snapshot()["spent_usd"],
+                        "cache_hit": False,
+                        "cache_kind": "none",
+                        "tokens_saved": 0,
+                        "tokens_saved_prompt": 0,
+                        "tokens_saved_completion": 0,
+                        "stream": True,
+                    }
+                )
+
+        if config.upstream_mode == "mock":
+            return StreamingResponse(
+                _tee_and_record(mock_chat_completion_stream(body, decision.model)),
+                media_type="text/event-stream",
+            )
+
+        status_code, up_headers, aiter, err = await proxy.forward_stream(
+            "POST", path, json_body=body, headers=headers
+        )
+        if aiter is None:
+            # Non-2xx before body — surface as JSON error (not SSE)
+            ledger.write(
+                {
+                    "surface": surface,
+                    "model": decision.model,
+                    "pool": decision.pool,
+                    "reason": decision.reason,
+                    "client_model": client_model,
+                    "status": "upstream_error",
+                    "status_code": status_code,
+                    "tokens": {},
+                    "cost_usd": est,
+                    "spent_usd": budget.snapshot()["spent_usd"],
+                    "cache_hit": False,
+                    "cache_kind": "none",
+                    "tokens_saved": 0,
+                    "tokens_saved_prompt": 0,
+                    "tokens_saved_completion": 0,
+                    "stream": True,
+                }
+            )
+            if isinstance(err, str):
+                return Response(
+                    content=err, status_code=status_code, media_type="text/plain"
+                )
+            return JSONResponse(err if err is not None else {"error": "upstream_error"}, status_code=status_code)
+
+        media = up_headers.get("content-type") or up_headers.get("Content-Type") or "text/event-stream"
+        # Prefer event-stream even if upstream omitted it
+        if "event-stream" not in media and "json" not in media:
+            media = "text/event-stream"
+        return StreamingResponse(_tee_and_record(aiter), media_type="text/event-stream")
 
     async def _handle(
         request: Request,
@@ -97,6 +238,23 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                     }
                 },
                 status_code=429,
+            )
+
+        # v1 streaming: chat only. Prefer clear 501 over silently buffering.
+        if body.get("stream") is True and surface != _CHAT_SURFACE:
+            return JSONResponse(
+                {
+                    "error": {
+                        "type": "streaming_not_supported",
+                        "message": (
+                            "stream:true is only supported on POST /v1/chat/completions "
+                            "in Harbor v1. Anthropic Messages and OpenAI Responses "
+                            "streaming are planned. Omit stream or use chat completions."
+                        ),
+                        "surface": surface,
+                    }
+                },
+                status_code=501,
             )
 
         decision = pick_model(
@@ -148,6 +306,18 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             else config.cost_estimates_usd.expensive_per_request
         )
 
+        # Chat streaming path (cache already bypassed via should_bypass_cache)
+        if body.get("stream") is True and surface == _CHAT_SURFACE:
+            return await _handle_stream(
+                body=body,
+                surface=surface,
+                path=path,
+                headers=headers,
+                decision=decision,
+                client_model=client_model,
+                est=est,
+            )
+
         status_code = 200
         result: dict[str, Any] | str
         if config.upstream_mode == "mock":
@@ -189,11 +359,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                     cost = float(result["cost"])
                 except (TypeError, ValueError):
                     pass
-            tokens = {
-                "prompt": usage.get("prompt_tokens") or usage.get("input_tokens"),
-                "completion": usage.get("completion_tokens") or usage.get("output_tokens"),
-                "total": usage.get("total_tokens"),
-            }
+            tokens = _tokens_from_usage(usage)
         else:
             tokens = {}
 

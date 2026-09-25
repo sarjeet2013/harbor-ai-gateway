@@ -134,6 +134,25 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+echo "== OpenAI /v1/chat/completions stream =="
+SCODE=$(curl -s -o /tmp/gw_chat_stream.txt -w "%{http_code}" \
+  -X POST "$BASE/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-local-gateway" \
+  -d "{\"model\":\"$CHEAP_MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hello from smoke stream\"}]}" || echo "000")
+if [[ "$SCODE" =~ ^2 ]] && grep -q "data:" /tmp/gw_chat_stream.txt && grep -q "\[DONE\]" /tmp/gw_chat_stream.txt; then
+  echo "PASS  POST /v1/chat/completions stream (HTTP $SCODE, data: + [DONE])"
+  PASS=$((PASS + 1))
+elif [[ "$SCODE" =~ ^2 ]] && grep -q "data:" /tmp/gw_chat_stream.txt; then
+  # litellm/Ollama may omit [DONE] depending on provider; require at least data:
+  echo "PASS  POST /v1/chat/completions stream (HTTP $SCODE, data:)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  POST /v1/chat/completions stream — HTTP $SCODE or missing data:"
+  echo "      body: $(head -c 500 /tmp/gw_chat_stream.txt 2>/dev/null || true)"
+  FAIL=$((FAIL + 1))
+fi
+
 echo
 echo "Results: $PASS passed, $FAIL failed"
 if [[ "$FAIL" -gt 0 ]]; then

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -55,6 +57,58 @@ def mock_chat_completion(body: dict[str, Any], model: str) -> dict[str, Any]:
             "total_tokens": max(2, (prompt_chars + completion_chars) // 4),
         },
     }
+
+
+def mock_chat_completion_stream(body: dict[str, Any], model: str) -> Iterator[bytes]:
+    """Yield OpenAI-compatible chat.completion SSE chunks ending with data: [DONE]."""
+    text = _echo_text(body, model)
+    prompt_chars = len(str(body.get("messages", "")))
+    completion_chars = len(text)
+    cid = f"chatcmpl-mock-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+    usage = {
+        "prompt_tokens": max(1, prompt_chars // 4),
+        "completion_tokens": max(1, completion_chars // 4),
+        "total_tokens": max(2, (prompt_chars + completion_chars) // 4),
+    }
+
+    def _line(obj: dict[str, Any]) -> bytes:
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
+
+    # Role + first content chunk
+    yield _line(
+        {
+            "id": cid,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": text},
+                    "finish_reason": None,
+                }
+            ],
+        }
+    )
+    # Final chunk with finish_reason + usage (so ledger can parse tokens)
+    yield _line(
+        {
+            "id": cid,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": usage,
+        }
+    )
+    yield b"data: [DONE]\n\n"
 
 
 def mock_anthropic_message(body: dict[str, Any], model: str) -> dict[str, Any]:

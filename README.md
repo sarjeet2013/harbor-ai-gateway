@@ -192,7 +192,7 @@ python -m edge cache-stats   # hit rate + tokens_saved from ledger
 
 Semantic cache and intelligent (judge) routing are **planned** (not shipped). Details: **[docs/features/cache.md](docs/features/cache.md)**.
 
-**Streaming** is also **planned** (edge buffers full JSON today; `stream: true` bypasses cache). v1 needs: SSE passthrough on chat, ledger/budget after the stream completes, smoke. Details: **[docs/features/streaming.md](docs/features/streaming.md)**.
+**Streaming (v1 chat):** `POST /v1/chat/completions` with `"stream": true` returns SSE (`text/event-stream`); cache is bypassed; ledger + budget update once after the stream completes. Messages/Responses streaming still planned (501 if `stream: true`). Details: **[docs/features/streaming.md](docs/features/streaming.md)**.
 
 ## Client attach
 
@@ -233,7 +233,7 @@ Logs: `logs/edge.log`, `logs/litellm.log`.
 
 **In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact response cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode for demos.
 
-**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned later:** streaming (SSE); semantic cache; intelligent/judge routing.
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **In (streaming):** chat SSE passthrough. **Planned later:** Messages/Responses SSE; semantic cache; intelligent/judge routing.
 
 ## Status
 
