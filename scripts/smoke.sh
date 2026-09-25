@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Smoke-test OpenAI chat, Anthropic messages, and OpenAI responses against the edge.
-# Expects mock mode (mock-cheap / mock-expensive). Start with:
-#   GATEWAY_CONFIG=config/gateway.mock.yaml python -m edge start
-#   # or: upstream_mode: mock + mock-* models in gateway.yaml
+# Works with default Ollama/LiteLLM (config/gateway.yaml) and mock mode.
+#   python -m edge start && ./scripts/smoke.sh
+#   GATEWAY_CONFIG=config/gateway.mock.yaml python -m edge start && ./scripts/smoke.sh
 set -euo pipefail
 
 BASE="${GATEWAY_BASE_URL:-http://127.0.0.1:4000}"
@@ -42,14 +42,34 @@ echo "== health =="
 HCODE=$(curl -s -o /tmp/gw_health.json -w "%{http_code}" "$BASE/healthz" || echo "000")
 py_check "GET /healthz" "$HCODE" /tmp/gw_health.json 'd.get("ok") is True'
 
+MODE=$(python3 -c "import json; print(json.load(open('/tmp/gw_health.json')).get('upstream_mode') or '')" 2>/dev/null || true)
+if [[ -n "${SMOKE_CHEAP_MODEL:-}" ]]; then
+  CHEAP_MODEL="$SMOKE_CHEAP_MODEL"
+elif [[ "$MODE" == "mock" ]]; then
+  CHEAP_MODEL="mock-cheap"
+else
+  # Default gateway.yaml pools
+  CHEAP_MODEL="ollama-cheap"
+fi
+echo "Mode: ${MODE:-unknown}  cheap model: $CHEAP_MODEL"
+
+# Chat shape: real completion with non-empty assistant text.
+# Mock mode also prefixes content with "mock:" — assert that when mode is mock.
+if [[ "$MODE" == "mock" ]]; then
+  CHAT_ASSERT='d.get("object")=="chat.completion" and "mock:" in (d["choices"][0]["message"].get("content") or "")'
+  EXP_ASSERT='d.get("object")=="chat.completion" and "mock:" in (d["choices"][0]["message"].get("content") or "")'
+else
+  CHAT_ASSERT='d.get("object")=="chat.completion" and isinstance(d["choices"][0]["message"].get("content"), str) and len(d["choices"][0]["message"]["content"].strip())>0'
+  EXP_ASSERT='d.get("object")=="chat.completion" and isinstance(d["choices"][0]["message"].get("content"), str) and len(d["choices"][0]["message"]["content"].strip())>0'
+fi
+
 echo "== OpenAI /v1/chat/completions =="
 CCODE=$(curl -s -o /tmp/gw_chat.json -w "%{http_code}" \
   -X POST "$BASE/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-local-gateway" \
-  -d '{"model":"mock-cheap","messages":[{"role":"user","content":"hello from smoke chat"}]}' || echo "000")
-py_check "POST /v1/chat/completions" "$CCODE" /tmp/gw_chat.json \
-  'd.get("object")=="chat.completion" and "mock:" in d["choices"][0]["message"]["content"]'
+  -d "{\"model\":\"$CHEAP_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hello from smoke chat\"}]}" || echo "000")
+py_check "POST /v1/chat/completions" "$CCODE" /tmp/gw_chat.json "$CHAT_ASSERT"
 
 echo "== Anthropic /v1/messages =="
 ACODE=$(curl -s -o /tmp/gw_msg.json -w "%{http_code}" \
@@ -57,16 +77,16 @@ ACODE=$(curl -s -o /tmp/gw_msg.json -w "%{http_code}" \
   -H "Content-Type: application/json" \
   -H "x-api-key: sk-local-gateway" \
   -H "anthropic-version: 2023-06-01" \
-  -d '{"model":"mock-cheap","max_tokens":64,"messages":[{"role":"user","content":"hello from smoke messages"}]}' || echo "000")
+  -d "{\"model\":\"$CHEAP_MODEL\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"hello from smoke messages\"}]}" || echo "000")
 py_check "POST /v1/messages" "$ACODE" /tmp/gw_msg.json \
-  'd.get("type")=="message" and d["content"][0]["type"]=="text"'
+  'd.get("type")=="message" and d["content"][0]["type"]=="text" and len((d["content"][0].get("text") or "").strip())>0'
 
 echo "== OpenAI /v1/responses (Codex) =="
 RCODE=$(curl -s -o /tmp/gw_resp.json -w "%{http_code}" \
   -X POST "$BASE/v1/responses" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-local-gateway" \
-  -d '{"model":"mock-cheap","input":"hello from smoke responses"}' || echo "000")
+  -d "{\"model\":\"$CHEAP_MODEL\",\"input\":\"hello from smoke responses\"}" || echo "000")
 py_check "POST /v1/responses" "$RCODE" /tmp/gw_resp.json \
   'd.get("object")=="response" and d.get("status")=="completed"'
 
@@ -95,9 +115,9 @@ echo "== expensive heuristic =="
 ECODE=$(curl -s -o /tmp/gw_exp.json -w "%{http_code}" \
   -X POST "$BASE/v1/chat/completions" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-local-gateway" \
   -d '{"model":"ignored","messages":[{"role":"user","content":"please refactor the architecture"}]}' || echo "000")
-py_check "expensive heuristic chat" "$ECODE" /tmp/gw_exp.json \
-  '"mock:" in d["choices"][0]["message"]["content"]'
+py_check "expensive heuristic chat" "$ECODE" /tmp/gw_exp.json "$EXP_ASSERT"
 
 # Confirm why-log recorded expensive pool for that request
 if python3 -c "
