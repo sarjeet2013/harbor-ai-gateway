@@ -436,9 +436,48 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             translate="responses",
         )
 
-    # LiteLLM Cursor path: clients may call /cursor/...; proxy through when litellm mode
+    def _model_list_payload() -> dict:
+        """OpenAI-style /v1/models listing Harbor pool aliases (for Cursor etc.)."""
+        data = []
+        for pool_name, specs in (
+            ("cheap", config.models.cheap),
+            ("expensive", config.models.expensive),
+        ):
+            for spec in specs:
+                data.append(
+                    {
+                        "id": spec.name,
+                        "object": "model",
+                        "owned_by": f"harbor-{pool_name}",
+                        "litellm_model": spec.litellm_model,
+                    }
+                )
+        return {"object": "list", "data": data}
+
+    @app.get("/v1/models")
+    async def list_models() -> JSONResponse:
+        return JSONResponse(_model_list_payload())
+
+    # Cursor Override Base URL → …/cursor (Cursor cloud calls /cursor/chat/completions).
+    # LiteLLM <~1.97 often has no /cursor route, so we serve Harbor's own chat/models
+    # path (budget + router + cache + ledger) instead of blind-proxying LiteLLM /cursor.
     @app.api_route("/cursor/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
     async def cursor_proxy(full_path: str, request: Request) -> Response:
+        path = full_path.lstrip("/")
+        if path.startswith("v1/"):
+            path = path[3:]
+
+        if path in ("models", "models/"):
+            return JSONResponse(_model_list_payload())
+
+        if path in ("chat/completions", "chat/completions/"):
+            return await _handle(
+                request,
+                surface="openai.chat.completions",
+                path="/v1/chat/completions",
+                mock_fn=mock_chat_completion,
+            )
+
         if config.upstream_mode == "mock":
             return JSONResponse(
                 {
@@ -449,6 +488,8 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 },
                 status_code=501,
             )
+
+        # Fallback: map remaining /cursor/* onto LiteLLM's OpenAI /v1/* surface
         body = None
         if request.method in ("POST", "PUT", "PATCH"):
             try:
@@ -457,7 +498,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 body = None
         status_code, result = await proxy.forward(
             request.method,
-            f"/cursor/{full_path}",
+            f"/v1/{path}",
             json_body=body,
             headers={k: v for k, v in request.headers.items()},
         )

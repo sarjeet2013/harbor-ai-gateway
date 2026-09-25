@@ -134,7 +134,7 @@ docker compose up --build -d          # edge only (mock mode)
 | `POST` | `/v1/responses` | Codex (`wire_api = "responses"`); edge→chat when `litellm` |
 | `GET` | `/healthz` | ops |
 | `GET` | `/v1/budget` | day spend snapshot |
-| `*` | `/cursor/...` | Cursor via LiteLLM (needs `upstream_mode: litellm` + HTTPS tunnel) |
+| `*` | `/cursor/...` | Cursor attach (Harbor chat/models; needs HTTPS tunnel) — [docs/features/cursor.md](docs/features/cursor.md) |
 
 ### curl examples
 
@@ -208,7 +208,7 @@ Copy-paste snippets live under `config/clients/`:
 | curl / OpenAI SDK | `OPENAI_BASE_URL=http://127.0.0.1:4000/v1` |
 | Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:4000` — needs `/v1/messages` |
 | Codex | `openai_base_url` + optional `wire_api = "responses"` |
-| Cursor | Public HTTPS tunnel + Override Base URL `…/cursor` (docs only; LiteLLM path) |
+| Cursor | Public HTTPS tunnel + Override Base URL `…/cursor` — [docs/features/cursor.md](docs/features/cursor.md) |
 
 ## Config
 

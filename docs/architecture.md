@@ -4,7 +4,7 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 
 ## Components
 
-1. **Clients** — curl/SDK first; Codex (`/v1/responses` or chat); Claude Code (Anthropic `/v1/messages`); Cursor (public HTTPS + LiteLLM `/cursor`).
+1. **Clients** — curl/SDK first; Codex (`/v1/responses` or chat); Claude Code (Anthropic `/v1/messages`); Cursor (public HTTPS + Harbor `/cursor` — see [features/cursor.md](features/cursor.md)).
 2. **Edge (ours)** — FastAPI on `:4000` (`listen`); budget → router → **cache** → ledger before upstream. Started by `python -m edge start`. Cache hits **skip upstream**.
 3. **Day budget** — spend-so-far vs `daily_budget_usd`; over budget → `on_budget_exceeded` (`force_cheap` | `reject`). Persisted to `budget_state_path` (default `data/budget.json`). Pure cache hits do **not** increment spend.
 4. **Heuristic router** — classify request; pick from `models.cheap` / `models.expensive` pools (alias = each entry’s `name`).
@@ -25,7 +25,7 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 | `POST /v1/chat/completions` | OpenAI Chat Completions (incl. `stream: true` SSE) |
 | `POST /v1/messages` | Anthropic Messages (Claude Code); in `litellm` mode edge translates ↔ chat/completions |
 | `POST /v1/responses` | OpenAI Responses (Codex `wire_api=responses`); in `litellm` mode edge translates ↔ chat/completions |
-| `/cursor/*` | Proxied to LiteLLM when `upstream_mode: litellm` |
+| `/cursor/*` | Harbor chat/models via `_handle`; other paths fall back to LiteLLM `/v1/*` |
 
 ## CLI
 
