@@ -192,11 +192,7 @@ Logs: `logs/edge.log`, `logs/litellm.log`.
 
 **In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; why-log; single YAML; CLI start/stop; client attach docs; mock mode for demos.
 
-**Out:** SpringLoom/Agentra, multi-user cloud, control-plane UI, Postgres, rebuilding clients.
-
-## Kill criteria
-
-If attach is so painful that you bypass the gateway on real work for a week → kill or redesign attach first.
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients.
 
 ## Status
 
