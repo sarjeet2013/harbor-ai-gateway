@@ -68,22 +68,36 @@ def _write_pidfile(data: dict[str, Any]) -> None:
     PID_PATH.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def _is_ollama_model(litellm_model: str | None) -> bool:
+    """True for local Ollama prefixes (ollama/ and ollama_chat/)."""
+    if not litellm_model:
+        return False
+    return litellm_model.startswith("ollama/") or litellm_model.startswith("ollama_chat/")
+
+
 def _warn_cloud_keys(cfg: GatewayConfig) -> None:
     specs = cfg.models.all_specs()
     if not specs:
         return
-    all_ollama = all(
-        (s.litellm_model or "").startswith("ollama/") for s in specs if s.litellm_model
-    )
-    if not all_ollama:
-        return
-    for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_API_KEY"):
-        if os.environ.get(key):
+    with_model = [s for s in specs if s.litellm_model]
+    # Warn (do not fail start) when any xai/* model and XAI_API_KEY unset.
+    if any((s.litellm_model or "").startswith("xai/") for s in with_model):
+        if not os.environ.get("XAI_API_KEY"):
             print(
-                f"warning: {key} is set but all models are ollama/* — "
-                "Ollama does not need cloud keys; ignore or unset if unintended.",
+                "warning: XAI_API_KEY is unset but config has xai/* model(s) — "
+                "cheap/Ollama still works; expensive/Grok requests will fail until "
+                "you export XAI_API_KEY.",
                 file=sys.stderr,
             )
+    # If every configured model is local Ollama, cloud OpenAI/Anthropic keys are unused.
+    if with_model and all(_is_ollama_model(s.litellm_model) for s in with_model):
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_API_KEY"):
+            if os.environ.get(key):
+                print(
+                    f"warning: {key} is set but all models are ollama/* / ollama_chat/* — "
+                    "Ollama does not need cloud keys; ignore or unset if unintended.",
+                    file=sys.stderr,
+                )
 
 
 def _find_litellm_cmd() -> list[str]:
