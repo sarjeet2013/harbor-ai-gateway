@@ -51,3 +51,22 @@ python -m edge start
 ```
 
 See also [RUN_OLLAMA.md](../../RUN_OLLAMA.md) and [streaming.md](streaming.md).
+
+## Troubleshooting: OpenAI "Connection error"
+
+If smoke/expensive fails with LiteLLM `OpenAIException - Connection error` while a direct
+`httpx` call to `api.openai.com` works, check LiteLLM logs for
+`SSLCertVerificationError` / `CERTIFICATE_VERIFY_FAILED`.
+
+LiteLLM's proxy uses **aiohttp** for OpenAI. On many macOS Python installs the default
+CA store is empty, so TLS fails. Harbor's `python -m edge start` sets `SSL_CERT_FILE` and
+`REQUESTS_CA_BUNDLE` to **certifi**'s bundle when unset. Restart after pulling that fix:
+
+```bash
+python -m edge stop
+python -m edge start --detach
+./scripts/smoke.sh
+```
+
+You can also export those yourself before start. Do not disable TLS verification.
+

@@ -38,6 +38,7 @@ def _load_dotenv(path: Path | None = None) -> list[str]:
     """Load KEY=VAL from repo .env into os.environ (do not override existing).
 
     Returns list of keys newly set. Shell exports always win.
+    Blank assignments (``KEY=``) are skipped so a later non-empty line can load.
     """
     env_path = path or (repo_root() / ".env")
     if not env_path.is_file():
@@ -56,6 +57,8 @@ def _load_dotenv(path: Path | None = None) -> list[str]:
             val.startswith("'") and val.endswith("'")
         ):
             val = val[1:-1]
+        if not val:
+            continue  # blank KEY= — allow a later non-empty line
         os.environ[key] = val
         loaded.append(key)
     return loaded
@@ -81,6 +84,32 @@ def _cloud_key_status(cfg: GatewayConfig) -> None:
         print(f"XAI_API_KEY: {'set (len=%d)' % len(k) if k else 'UNSET'}")
 
 
+
+
+
+def _ensure_ssl_ca_env(env: dict[str, str] | None = None) -> str | None:
+    """Point SSL at certifi CAs when unset.
+
+    LiteLLM proxy uses aiohttp for cloud providers. On many macOS Python builds the
+    default trust store cannot verify public CAs, so OpenAI calls fail as
+    ``CERTIFICATE_VERIFY_FAILED`` and LiteLLM surfaces a vague "Connection error".
+    httpx (and Harbor's own probes) already use certifi; aiohttp needs
+    ``SSL_CERT_FILE`` / ``REQUESTS_CA_BUNDLE``.
+    """
+    target: dict[str, str] = env if env is not None else os.environ  # type: ignore[assignment]
+    existing = target.get("SSL_CERT_FILE") or target.get("REQUESTS_CA_BUNDLE")
+    if existing:
+        return existing
+    try:
+        import certifi
+    except ImportError:
+        return None
+    ca = certifi.where()
+    if not Path(ca).is_file():
+        return None
+    target.setdefault("SSL_CERT_FILE", ca)
+    target.setdefault("REQUESTS_CA_BUNDLE", ca)
+    return ca
 
 
 def _port_open(host: str, port: int, timeout: float = 0.3) -> bool:
@@ -177,7 +206,9 @@ def _start_litellm(cfg: GatewayConfig, litellm_cfg: Path, *, detach: bool) -> su
     LITELLM_LOG.parent.mkdir(parents=True, exist_ok=True)
     log_f = LITELLM_LOG.open("a")
     # Inherit current env explicitly so OPENAI_API_KEY / .env loads reach LiteLLM.
+    # Pin certifi CAs for aiohttp (LiteLLM OpenAI path) — see _ensure_ssl_ca_env.
     child_env = dict(os.environ)
+    _ensure_ssl_ca_env(child_env)
     popen_kwargs: dict[str, Any] = {
         "cwd": str(repo_root()),
         "stdout": log_f,
@@ -378,6 +409,9 @@ def cmd_config_check(_args: argparse.Namespace | None = None) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     ensure_deps()
     loaded = _load_dotenv()
+    ca = _ensure_ssl_ca_env()
+    if ca:
+        print(f"SSL CA: {ca}")
     if loaded:
         print(f"loaded .env keys: {', '.join(loaded)}")
     cfg = load_config()

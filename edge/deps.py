@@ -22,6 +22,7 @@ REQUIRED_IMPORTS: dict[str, str] = {
     "fastapi": "fastapi",
     "httpx": "httpx",
     "uvicorn": "uvicorn",
+    "certifi": "certifi",
 }
 
 LITELLM_IMPORT = "litellm"
