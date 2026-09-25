@@ -15,6 +15,9 @@ Optional alternatives in YAML comments: Grok (`xai/grok-3-mini` + `XAI_API_KEY`)
 
 ## How the key is wired
 
+`python -m edge start` loads repo-root `.env` (shell exports win) and passes the env to LiteLLM. Copy `.env.example` → `.env` and set `OPENAI_API_KEY`.
+
+
 - LiteLLM (and Harbor’s generator) use env **`OPENAI_API_KEY`**. Do not put raw keys in YAML.
 - `edge/litellm_gen.py` auto-sets `api_key: os.environ/OPENAI_API_KEY` on any `openai/*` model (and `XAI_API_KEY` for `xai/*`) unless you override via `extra_litellm_params`.
 - `python -m edge start` **warns** (does not fail) if any `openai/*` model is configured and `OPENAI_API_KEY` is unset.

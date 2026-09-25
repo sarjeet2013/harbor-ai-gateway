@@ -34,6 +34,55 @@ def _ensure_dirs() -> None:
     (repo_root() / "logs").mkdir(parents=True, exist_ok=True)
 
 
+def _load_dotenv(path: Path | None = None) -> list[str]:
+    """Load KEY=VAL from repo .env into os.environ (do not override existing).
+
+    Returns list of keys newly set. Shell exports always win.
+    """
+    env_path = path or (repo_root() / ".env")
+    if not env_path.is_file():
+        return []
+    loaded: list[str] = []
+    for raw in env_path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        val = val.strip()
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
+            val = val[1:-1]
+        os.environ[key] = val
+        loaded.append(key)
+    return loaded
+
+
+def _cloud_key_status(cfg: GatewayConfig) -> None:
+    """Print whether cloud keys needed by configured models are present."""
+    specs = [s for s in cfg.models.all_specs() if s.litellm_model]
+    needs_openai = any((s.litellm_model or "").startswith("openai/") for s in specs)
+    needs_xai = any((s.litellm_model or "").startswith("xai/") for s in specs)
+    if needs_openai:
+        k = os.environ.get("OPENAI_API_KEY")
+        if k:
+            print(f"OPENAI_API_KEY: set (len={len(k)})")
+        else:
+            print(
+                "OPENAI_API_KEY: UNSET — expensive/OpenAI calls will fail until "
+                "you export it or put it in .env",
+                file=sys.stderr,
+            )
+    if needs_xai:
+        k = os.environ.get("XAI_API_KEY")
+        print(f"XAI_API_KEY: {'set (len=%d)' % len(k) if k else 'UNSET'}")
+
+
+
+
 def _port_open(host: str, port: int, timeout: float = 0.3) -> bool:
     # Treat 0.0.0.0 as localhost for connect checks
     check_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
@@ -127,11 +176,14 @@ def _start_litellm(cfg: GatewayConfig, litellm_cfg: Path, *, detach: bool) -> su
     ]
     LITELLM_LOG.parent.mkdir(parents=True, exist_ok=True)
     log_f = LITELLM_LOG.open("a")
+    # Inherit current env explicitly so OPENAI_API_KEY / .env loads reach LiteLLM.
+    child_env = dict(os.environ)
     popen_kwargs: dict[str, Any] = {
         "cwd": str(repo_root()),
         "stdout": log_f,
         "stderr": subprocess.STDOUT,
         "start_new_session": True,  # own process group for clean kill
+        "env": child_env,
     }
     try:
         return subprocess.Popen(cmd, **popen_kwargs)
@@ -325,10 +377,14 @@ def cmd_config_check(_args: argparse.Namespace | None = None) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     ensure_deps()
+    loaded = _load_dotenv()
+    if loaded:
+        print(f"loaded .env keys: {', '.join(loaded)}")
     cfg = load_config()
     # Require litellm import + CLI *before* generating config / spawning
     ensure_upstream_deps(cfg.upstream_mode)
     _ensure_dirs()
+    _cloud_key_status(cfg)
     _warn_cloud_keys(cfg)
 
     # Refuse double-start if our pidfile looks live
