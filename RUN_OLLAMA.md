@@ -1,7 +1,7 @@
 # Run Harbor AI Gateway with Ollama (Mac)
 
-**Hybrid default:** cheap = local Ollama (`llama3.2:1b`) · expensive = OpenAI (`openai/gpt-4o-mini`)  
-**Ports:** edge `:4000` → LiteLLM `:4001` → Ollama `:11434` (+ OpenAI cloud for expensive)  
+**Hybrid default:** cheap = Mini LAN Ollama (`qwen3:8b` @ `192.168.4.31:11434`) · expensive = OpenAI (`openai/gpt-4o-mini`)  
+**Ports:** edge `:4000` → LiteLLM `:4001` → Mini Ollama `:11434` (+ OpenAI cloud for expensive)  
 **Config:** edit **only** `config/gateway.yaml` (models carry `litellm_model` + optional `api_base`)  
 **Keys:** everyday Ollama needs **no** cloud key. For expensive/heuristic OpenAI: `export OPENAI_API_KEY=...`  
 Details: **[docs/features/hybrid.md](docs/features/hybrid.md)**.
@@ -9,11 +9,10 @@ Details: **[docs/features/hybrid.md](docs/features/hybrid.md)**.
 ## One-time setup
 
 ```bash
-# Pull cheap model (~1 GB on arm64). Expensive OpenAI is cloud — no ollama pull needed for it.
-ollama pull llama3.2:1b
-# Optional if you switch expensive back to all-Ollama (see commented block in gateway.yaml):
-# ollama pull llama3.2:3b
-ollama list
+# Cheap model lives on Mac Mini (already: qwen3:8b). From Air, confirm LAN:
+curl -s http://192.168.4.31:11434/api/tags
+# On Mini (once): OLLAMA_HOST=0.0.0.0:11434 and `ollama pull qwen3:8b`
+# Air local Ollama (llama3.2:*) can stay; cheap pool does not use it.
 
 # Clone / enter repo
 cd ~/harbor-ai-gateway   # or wherever you cloned sarjeet2013/harbor-ai-gateway
@@ -33,8 +32,8 @@ Confirm `config/gateway.yaml` has `upstream_mode: litellm` and hybrid pools:
 models:
   cheap:
     - name: ollama-cheap
-      litellm_model: ollama_chat/llama3.2:1b
-      api_base: http://127.0.0.1:11434
+      litellm_model: ollama_chat/qwen3:8b
+      api_base: http://192.168.4.31:11434
   expensive:
     - name: openai-expensive
       litellm_model: openai/gpt-4o-mini

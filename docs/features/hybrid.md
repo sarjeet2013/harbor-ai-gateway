@@ -6,7 +6,7 @@
 
 | Pool | Alias | LiteLLM model | Needs key? |
 | --- | --- | --- | --- |
-| cheap | `ollama-cheap` | `ollama_chat/llama3.2:3b` + `api_base` Ollama | No |
+| cheap | `ollama-cheap` | `ollama_chat/qwen3:8b` + `api_base` Mini Ollama (`http://192.168.4.31:11434`) | No |
 | expensive | `openai-expensive` | `openai/gpt-4o-mini` | Yes — `OPENAI_API_KEY` |
 
 Default expensive id is `openai/gpt-4o-mini` (strong, lower cost than `gpt-4o`). Bump via `litellm_model: openai/gpt-4o` in `config/gateway.yaml`. See [LiteLLM OpenAI](https://docs.litellm.ai/docs/providers/openai).
@@ -27,7 +27,7 @@ Harbor authenticates *clients* with a local bearer (e.g. `sk-local-gateway`). Th
 
 ## Optional all-Ollama expensive
 
-Comment out the OpenAI entry in `config/gateway.yaml` and use the commented `ollama-expensive` / `ollama_chat/llama3.2:3b` block instead (no cloud key). Set `cost_estimates_usd.expensive_per_request` back to `0.0` if you want.
+Comment out the OpenAI entry in `config/gateway.yaml` and use the commented `ollama-expensive` block instead (point `api_base` at the same Ollama host; no cloud key). Set `cost_estimates_usd.expensive_per_request` back to `0.0` if you want.
 
 ## Smoke
 
@@ -40,9 +40,12 @@ Mock mode (`GATEWAY_CONFIG=config/gateway.mock.yaml`) always asserts expensive s
 
 ## Mac quick path
 
+Default cheap pool points at **Mac Mini Ollama on LAN** (`qwen3:8b` @ `http://192.168.4.31:11434`). On the Mini: `OLLAMA_HOST=0.0.0.0:11434` so it listens on the LAN, and `ollama pull qwen3:8b` once. Air local Ollama can stay on `127.0.0.1` for other use.
+
 ```bash
 cd ~/github/harbor-ai-gateway && source .venv/bin/activate
-ollama pull llama3.2:3b
+# Confirm Mini is reachable from Air:
+curl -s http://192.168.4.31:11434/api/tags | head
 # optional for OpenAI expensive:
 # export OPENAI_API_KEY=...   # from platform.openai.com — never commit
 python -m edge stop

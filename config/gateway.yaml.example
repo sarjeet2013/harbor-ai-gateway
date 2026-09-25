@@ -1,9 +1,9 @@
 # Canonical config template — copy to gateway.yaml and edit.
 # Do NOT hand-edit litellm_config.yaml (deprecated).
 # CLI writes config/.generated_litellm.yaml from `models:` (override with GATEWAY_LITELLM_CONFIG).
-# Hybrid default: cheap = local Ollama, expensive = OpenAI.
+# Hybrid default: cheap = Mini LAN Ollama (qwen3:8b), expensive = OpenAI.
 # Everyday Ollama works without OPENAI_API_KEY; export OPENAI_API_KEY for expensive/heuristic.
-# Ollama e2e on Mac: edge :4000 → LiteLLM :4001 → Ollama :11434 (+ OpenAI cloud for expensive)
+# Ollama e2e: edge :4000 → LiteLLM :4001 → Mini Ollama :11434 (+ OpenAI cloud for expensive)
 listen: "0.0.0.0:4000"
 litellm_host: "127.0.0.1"
 litellm_port: 4001          # managed internal; `python -m edge start` launches it
@@ -23,8 +23,9 @@ cost_estimates_usd:
 models:
   cheap:
     - name: ollama-cheap
-      litellm_model: ollama_chat/llama3.2:3b
-      api_base: http://127.0.0.1:11434
+      # Default: Mac Mini Ollama on LAN. For local-only: 127.0.0.1 + any pulled model.
+      litellm_model: ollama_chat/qwen3:8b
+      api_base: http://192.168.4.31:11434
   expensive:
     # Hybrid: OpenAI. Default gpt-4o-mini (strong + cheaper than gpt-4o).
     # To bump: litellm_model: openai/gpt-4o
