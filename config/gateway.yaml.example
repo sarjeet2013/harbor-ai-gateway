@@ -38,3 +38,12 @@ router:
     - "analyze the entire"
     - "write a detailed"
   expensive_min_chars: 2000
+
+# Exact response cache (semantic mode planned — see docs/features/cache.md)
+cache:
+  enabled: true
+  mode: exact   # exact | semantic (semantic planned)
+  ttl_seconds: 86400
+  max_entries: 1000
+  path: data/cache
+  # semantic later: embedding_model, similarity_threshold

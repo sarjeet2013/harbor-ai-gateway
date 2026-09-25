@@ -1,6 +1,6 @@
 # Harbor AI Gateway
 
-**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, and a **why-log** on every request.
+**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, **exact response cache** (tokens saved), and a **why-log** on every request.
 
 Goal: usable on one machine, something to build on — not an enterprise control plane.
 
@@ -8,7 +8,7 @@ Goal: usable on one machine, something to build on — not an enterprise control
 
 | Layer | Owner |
 | --- | --- |
-| Day budget gate, heuristic router, why-log | **Us** (FastAPI edge `:4000`) |
+| Day budget gate, heuristic router, response cache, why-log | **Us** (FastAPI edge `:4000`) |
 | Provider adapters, keys, OpenAI-compatible proxy | **LiteLLM** (`:4001`, managed by CLI) |
 | Cursor / Claude Code / Codex | **Clients** (attach via `config/clients/`) |
 
@@ -26,6 +26,7 @@ flowchart LR
   subgraph edge [Our edge :4000]
     BUDGET[Day budget gate]
     ROUTER[Heuristic router]
+    CACHE[Response cache]
     WHY[Why-log]
   end
 
@@ -37,10 +38,12 @@ flowchart LR
   CC -->|Anthropic /v1/messages| BUDGET
   CODEX -->|/v1/responses or chat| BUDGET
 
-  BUDGET --> ROUTER --> WHY --> LITELLM --> UP
+  BUDGET --> ROUTER --> CACHE
+  CACHE -->|miss| WHY --> LITELLM --> UP
+  CACHE -->|hit| WHY
 ```
 
-**Request path:** Client → edge `:4000` → budget → router → why-log → (CLI-managed) LiteLLM `:4001` (or mock) → providers → client.
+**Request path:** Client → edge `:4000` → budget → router → **cache** → why-log → (CLI-managed) LiteLLM `:4001` (or mock) → providers → client. Cache hits skip upstream.
 
 ## Quick start (recommended CLI)
 
@@ -153,7 +156,18 @@ curl -s http://127.0.0.1:4000/v1/responses \
 - **Day budget** (`daily_budget_usd`): tracked in memory and persisted to `data/budget.json`.
 - **`on_budget_exceeded`**: `force_cheap` (default) or `reject` (HTTP 429).
 - **Heuristic router**: cheap by default; expensive if prompt matches `router.expensive_keywords` or exceeds `expensive_min_chars`.
-- **Why-log**: JSONL at `logs/why.jsonl` — each line has `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`.
+- **Why-log**: JSONL at `logs/why.jsonl` — each line has `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`, plus `cache_hit` / `cache_kind` / `tokens_saved*`.
+
+
+## Cache (shipping: exact)
+
+Exact response cache on local disk (`data/cache/`) — **enabled by default** in `config/gateway.yaml` (`cache.enabled: true`, TTL 24h). Hits skip upstream and do **not** charge the day budget; why-log records `cache_hit`, `cache_kind`, and `tokens_saved*`.
+
+```bash
+python -m edge cache-stats   # hit rate + tokens_saved from why-log
+```
+
+Semantic cache and intelligent (judge) routing are **planned** (not shipped). Details: **[docs/features/cache.md](docs/features/cache.md)**.
 
 ## Client attach
 
@@ -185,14 +199,15 @@ Legacy: pools as bare string lists (`cheap: ["ollama-cheap"]`) still load for th
 | `python -m edge stop` | Kill via pidfile / ports |
 | `python -m edge status` | Ports, pids, upstream_mode, models |
 | `python -m edge config-check` | Print resolved aliases → `litellm_model` |
+| `python -m edge cache-stats` | Cache hit rate + total tokens saved |
 
 Logs: `logs/edge.log`, `logs/litellm.log`.
 
 ## v0 scope
 
-**In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; why-log; single YAML; CLI start/stop; client attach docs; mock mode for demos.
+**In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact response cache + tokens_saved; why-log; single YAML; CLI start/stop; client attach docs; mock mode for demos.
 
-**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients.
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned later:** semantic cache; intelligent/judge routing.
 
 ## Status
 

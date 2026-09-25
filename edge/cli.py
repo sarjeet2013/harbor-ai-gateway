@@ -1,4 +1,4 @@
-"""CLI: python -m edge {start|stop|status|config-check}"""
+"""CLI: python -m edge {start|stop|status|config-check|cache-stats}"""
 
 from __future__ import annotations
 
@@ -400,6 +400,66 @@ def cmd_start(args: argparse.Namespace) -> int:
             PID_PATH.unlink(missing_ok=True)
             return litellm_proc.returncode or 1
         time.sleep(0.5)
+
+
+
+def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
+    """Summarize cache hits / tokens_saved from why-log (+ disk entry count)."""
+    cfg = load_config()
+    why_path = Path(cfg.why_log_path)
+    if not why_path.is_absolute():
+        why_path = repo_root() / why_path
+
+    total = 0
+    hits = 0
+    tokens_saved = 0
+    tokens_saved_prompt = 0
+    tokens_saved_completion = 0
+    by_kind: dict[str, int] = {}
+
+    if why_path.exists():
+        with why_path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                # Only count lines that know about cache fields (post-feature)
+                if "cache_hit" not in row:
+                    continue
+                total += 1
+                if row.get("cache_hit"):
+                    hits += 1
+                kind = str(row.get("cache_kind") or "none")
+                by_kind[kind] = by_kind.get(kind, 0) + 1
+                try:
+                    tokens_saved += int(row.get("tokens_saved") or 0)
+                    tokens_saved_prompt += int(row.get("tokens_saved_prompt") or 0)
+                    tokens_saved_completion += int(row.get("tokens_saved_completion") or 0)
+                except (TypeError, ValueError):
+                    pass
+
+    from .cache import ResponseCache
+
+    disk = ResponseCache(cfg.cache).stats()
+    hit_rate = (hits / total) if total else 0.0
+    print(f"cache.enabled:     {cfg.cache.enabled}")
+    print(f"cache.mode:        {cfg.cache.mode}")
+    print(f"cache.path:        {disk['path']}")
+    print(f"disk.entries:      {disk['entries']} / {disk['max_entries']}")
+    print(f"why-log:           {why_path}")
+    print(f"requests (w/cache fields): {total}")
+    print(f"hits:              {hits}")
+    print(f"hit_rate:          {hit_rate:.1%}")
+    print(f"tokens_saved:      {tokens_saved}")
+    print(f"  prompt:          {tokens_saved_prompt}")
+    print(f"  completion:      {tokens_saved_completion}")
+    if by_kind:
+        print("by cache_kind:", ", ".join(f"{k}={v}" for k, v in sorted(by_kind.items())))
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:

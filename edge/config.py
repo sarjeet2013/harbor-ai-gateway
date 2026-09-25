@@ -74,6 +74,20 @@ class CostEstimates(BaseModel):
     expensive_per_request: float = 0.02
 
 
+
+class CacheConfig(BaseModel):
+    """Exact response cache (semantic mode planned — see docs/features/cache.md)."""
+
+    enabled: bool = True
+    mode: str = "exact"  # exact | semantic (semantic planned; falls back to exact hashing)
+    ttl_seconds: int = 86400
+    max_entries: int = 1000
+    path: str = "data/cache"
+    # Planned (not used yet):
+    embedding_model: str | None = None
+    similarity_threshold: float | None = None
+
+
 class GatewayConfig(BaseModel):
     listen: str = "0.0.0.0:4000"
     litellm_host: str = "127.0.0.1"
@@ -88,6 +102,7 @@ class GatewayConfig(BaseModel):
     cost_estimates_usd: CostEstimates = Field(default_factory=CostEstimates)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
+    cache: CacheConfig = Field(default_factory=CacheConfig)
 
     @model_validator(mode="after")
     def _resolve_litellm_base_url(self) -> GatewayConfig:

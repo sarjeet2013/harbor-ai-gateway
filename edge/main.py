@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from .budget import DayBudget
+from .cache import ResponseCache, should_bypass_cache
 from .config import GatewayConfig, load_config
 from .mock_upstream import mock_anthropic_message, mock_chat_completion, mock_responses
 from .proxy import LiteLLMProxy
@@ -26,6 +27,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     budget = DayBudget(config)
     why = WhyLog(config.why_log_path)
     proxy = LiteLLMProxy(config.litellm_base_url)
+    cache = ResponseCache(config.cache)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -35,6 +37,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     app.state.config = config
     app.state.budget = budget
     app.state.why = why
+    app.state.cache = cache
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
@@ -42,6 +45,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             "ok": True,
             "upstream_mode": config.upstream_mode,
             "budget": budget.snapshot(),
+            "cache": cache.stats(),
         }
 
     @app.get("/v1/budget")
@@ -73,6 +77,11 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                     "status": "rejected",
                     "spent_usd": spent,
                     "remaining_usd": remaining,
+                    "cache_hit": False,
+                    "cache_kind": "none",
+                    "tokens_saved": 0,
+                    "tokens_saved_prompt": 0,
+                    "tokens_saved_completion": 0,
                 }
             )
             return JSONResponse(
@@ -98,6 +107,41 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         )
         body = {**body, "model": decision.model}
 
+        headers = {k: v for k, v in request.headers.items()}
+        bypass = should_bypass_cache(body, headers)
+
+        # Cache sits after router, before upstream — hits skip LiteLLM/mock.
+        if cache.enabled and not bypass:
+            hit = cache.get(
+                body, model=decision.model, pool=decision.pool, surface=surface
+            )
+            if hit is not None:
+                # Pure cache hit: do not increment day spend.
+                why.write(
+                    {
+                        "surface": surface,
+                        "model": decision.model,
+                        "pool": decision.pool,
+                        "reason": decision.reason,
+                        "client_model": client_model,
+                        "status": "ok",
+                        "status_code": 200,
+                        "tokens": {
+                            "prompt": hit.tokens_saved_prompt,
+                            "completion": hit.tokens_saved_completion,
+                            "total": hit.tokens_saved,
+                        },
+                        "cost_usd": 0.0,
+                        "spent_usd": budget.snapshot()["spent_usd"],
+                        "cache_hit": True,
+                        "cache_kind": hit.kind,
+                        "tokens_saved": hit.tokens_saved,
+                        "tokens_saved_prompt": hit.tokens_saved_prompt,
+                        "tokens_saved_completion": hit.tokens_saved_completion,
+                    }
+                )
+                return JSONResponse(hit.body, status_code=200)
+
         est = (
             config.cost_estimates_usd.cheap_per_request
             if decision.pool == "cheap"
@@ -110,7 +154,6 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             result = mock_fn(body, decision.model)
             status = "ok"
         else:
-            headers = {k: v for k, v in request.headers.items()}
             upstream_path = path
             upstream_body = body
             if translate == "anthropic":
@@ -156,6 +199,20 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
 
         if status == "ok":
             budget.record(cost)
+            # Store non-streaming successful JSON responses
+            if (
+                cache.enabled
+                and not bypass
+                and isinstance(result, dict)
+                and status_code < 400
+            ):
+                cache.set(
+                    body,
+                    model=decision.model,
+                    pool=decision.pool,
+                    surface=surface,
+                    response=result,
+                )
 
         why.write(
             {
@@ -169,6 +226,11 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 "tokens": tokens,
                 "cost_usd": cost,
                 "spent_usd": budget.snapshot()["spent_usd"],
+                "cache_hit": False,
+                "cache_kind": "none",
+                "tokens_saved": 0,
+                "tokens_saved_prompt": 0,
+                "tokens_saved_completion": 0,
             }
         )
 
