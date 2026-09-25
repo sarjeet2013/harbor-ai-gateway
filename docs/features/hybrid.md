@@ -15,6 +15,9 @@ Optional alternatives in YAML comments: Grok (`xai/grok-3-mini` + `XAI_API_KEY`)
 
 ## How the key is wired
 
+Harbor authenticates *clients* with a local bearer (e.g. `sk-local-gateway`). That header is **not** forwarded to LiteLLM — otherwise LiteLLM would send it to OpenAI as the provider key and fail. Provider auth is only `OPENAI_API_KEY` in the LiteLLM process env (or `.env` loaded on `edge start`).
+
+
 `python -m edge start` loads repo-root `.env` (shell exports win) and passes the env to LiteLLM. Copy `.env.example` → `.env` and set `OPENAI_API_KEY`.
 
 

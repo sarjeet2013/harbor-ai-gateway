@@ -13,13 +13,21 @@ class LiteLLMProxy:
         self.timeout = timeout
 
     def _hop_headers(self, headers: dict[str, str] | None) -> dict[str, str]:
+        """Headers sent to LiteLLM.
+
+        Never forward client ``Authorization`` / ``x-api-key`` — those are Harbor
+        client credentials (e.g. sk-local-gateway). LiteLLM would otherwise pass
+        them through to OpenAI as the provider key and fail with a vague
+        "Connection error". Provider auth comes from LiteLLM env/config
+        (OPENAI_API_KEY, etc.).
+        """
         hop = {"content-type": "application/json"}
         if headers:
             for k, v in headers.items():
                 lk = k.lower()
+                if lk in ("authorization", "x-api-key"):
+                    continue
                 if lk in (
-                    "authorization",
-                    "x-api-key",
                     "anthropic-version",
                     "openai-organization",
                 ):
