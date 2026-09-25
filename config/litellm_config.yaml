@@ -1,17 +1,18 @@
-# LiteLLM proxy → local Ollama (no cloud keys required)
-# Docs: https://docs.litellm.ai/docs/providers/ollama
+# DEPRECATED — do not hand-edit.
 #
-# Run on the same host as Ollama (Mac). api_base is loopback, not host.docker.internal.
+# Model aliases now live in config/gateway.yaml under `models:`.
+# `python -m edge start` generates config/.generated_litellm.yaml from that file.
+#
+# Override path only if needed:
+#   export GATEWAY_LITELLM_CONFIG=/path/to/custom.yaml
+#
+# This stub remains so older docker-compose mounts do not explode; prefer the CLI.
+# For a one-off manual LiteLLM launch, point at the generated file instead:
+#   litellm --config config/.generated_litellm.yaml --port 4001
+#
+# Minimal placeholder (empty model_list) — regenerate via the CLI for real use.
 
-model_list:
-  - model_name: ollama-cheap
-    litellm_params:
-      model: ollama/llama3.2:1b
-      api_base: http://127.0.0.1:11434
-  - model_name: ollama-expensive
-    litellm_params:
-      model: ollama/llama3.2:3b
-      api_base: http://127.0.0.1:11434
+model_list: []
 
 litellm_settings:
   drop_params: true

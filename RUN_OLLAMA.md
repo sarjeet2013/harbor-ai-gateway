@@ -1,7 +1,8 @@
 # Run local-llm-gateway with Ollama (Mac)
 
 **Models:** `llama3.2:1b` (cheap) · `llama3.2:3b` (expensive)  
-**Ports:** edge `:4000` → LiteLLM `:4001` → Ollama `:11434`
+**Ports:** edge `:4000` → LiteLLM `:4001` → Ollama `:11434`  
+**Config:** edit **only** `config/gateway.yaml` (models carry `litellm_model` + `api_base`)
 
 ## One-time setup
 
@@ -13,34 +14,52 @@ ollama list
 
 # Clone / enter repo
 cd ~/local-llm-gateway   # or wherever you cloned sarjeet2013/local-llm-gateway
+git pull
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt 'litellm[proxy]'
 mkdir -p logs data
 ```
 
-Confirm `config/gateway.yaml` has `upstream_mode: litellm` and pools
-`ollama-cheap` / `ollama-expensive`, and `config/litellm_config.yaml` points at
-`http://127.0.0.1:11434`.
+Confirm `config/gateway.yaml` has `upstream_mode: litellm` and unified pools:
 
-## Start (two terminals)
-
-```bash
-# Terminal 1 — LiteLLM
-cd ~/local-llm-gateway && source .venv/bin/activate
-litellm --config config/litellm_config.yaml --port 4001 --host 127.0.0.1
-
-# Terminal 2 — edge
-cd ~/local-llm-gateway && source .venv/bin/activate
-python -m uvicorn edge.main:app --host 0.0.0.0 --port 4000
+```yaml
+models:
+  cheap:
+    - name: ollama-cheap
+      litellm_model: ollama/llama3.2:1b
+      api_base: http://127.0.0.1:11434
+  expensive:
+    - name: ollama-expensive
+      litellm_model: ollama/llama3.2:3b
+      api_base: http://127.0.0.1:11434
 ```
 
-Or background both:
+**Do not edit `config/litellm_config.yaml`.** The CLI generates `config/.generated_litellm.yaml`.
+
+### Cloud API keys
+
+Ollama does not need `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. If those are set in your shell while all models are `ollama/*`, the CLI prints a warning — you can ignore or unset them for a cleaner env. The CLI does not strip your environment globally.
+
+## Start / stop (one command)
 
 ```bash
 cd ~/local-llm-gateway && source .venv/bin/activate
-nohup litellm --config config/litellm_config.yaml --port 4001 --host 127.0.0.1 > logs/litellm.log 2>&1 &
-nohup python -m uvicorn edge.main:app --host 0.0.0.0 --port 4000 > logs/edge.log 2>&1 &
+
+# Sanity: aliases must include ollama-cheap / ollama-expensive
+python -m edge config-check
+
+# Stop any old manual uvicorn/litellm you had on :4000/:4001
+python -m edge stop
+# or: kill old terminals / lsof -ti tcp:4000,4001 | xargs kill
+
+# Foreground (Ctrl+C stops both)
+python -m edge start
+
+# Or background
+python -m edge start --detach
+python -m edge status
+python -m edge stop
 ```
 
 ## Smoke test

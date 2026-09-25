@@ -1,7 +1,9 @@
+# Canonical config — edit models here only. CLI generates LiteLLM YAML from this.
 # Ollama e2e on Mac: edge :4000 → LiteLLM :4001 → Ollama :11434
 listen: "0.0.0.0:4000"
-litellm_base_url: "http://127.0.0.1:4001"
-upstream_mode: litellm  # mock | litellm
+litellm_host: "127.0.0.1"
+litellm_port: 4001          # managed internal; `python -m edge start` launches it
+upstream_mode: litellm       # mock | litellm
 
 daily_budget_usd: 10.0
 on_budget_exceeded: force_cheap  # force_cheap | reject
@@ -15,8 +17,14 @@ cost_estimates_usd:
   expensive_per_request: 0.0
 
 models:
-  cheap: ["ollama-cheap"]
-  expensive: ["ollama-expensive"]
+  cheap:
+    - name: ollama-cheap
+      litellm_model: ollama/llama3.2:1b
+      api_base: http://127.0.0.1:11434
+  expensive:
+    - name: ollama-expensive
+      litellm_model: ollama/llama3.2:3b
+      api_base: http://127.0.0.1:11434
 
 router:
   strategy: heuristic_cost_first

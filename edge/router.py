@@ -80,9 +80,9 @@ def pick_model(
         pool = wanted
         reason = f"heuristic:{heur}"
 
-    models = cfg.models.cheap if pool == "cheap" else cfg.models.expensive
+    models = cfg.models.names(pool)
     if not models:
-        models = cfg.models.cheap or ["mock-cheap"]
+        models = cfg.models.cheap_names or ["mock-cheap"]
         pool = "cheap"
         reason += ";fallback_empty_pool"
 

@@ -9,3 +9,4 @@ logs/*
 !logs/.gitkeep
 data/*
 !data/.gitkeep
+config/.generated_litellm.yaml

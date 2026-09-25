@@ -1,12 +1,13 @@
-# Edge + LiteLLM pointer (v0)
+# Canonical config template — copy to gateway.yaml and edit.
+# Do NOT hand-edit litellm_config.yaml; the CLI generates it from `models:`.
 listen: "0.0.0.0:4000"
-litellm_base_url: "http://127.0.0.1:4001"
-upstream_mode: litellm  # mock | litellm  (use litellm for Ollama e2e)
+litellm_host: "127.0.0.1"
+litellm_port: 4001
+upstream_mode: litellm  # mock | litellm
 
 daily_budget_usd: 10.0
 on_budget_exceeded: force_cheap  # force_cheap | reject
 budget_state_path: "data/budget.json"
-
 why_log_path: "logs/why.jsonl"
 
 cost_estimates_usd:
@@ -14,9 +15,17 @@ cost_estimates_usd:
   expensive_per_request: 0.0
 
 models:
-  # Ollama e2e (see RUN_OLLAMA.md). For mock demos use ["mock-cheap"] / ["mock-expensive"].
-  cheap: ["ollama-cheap"]
-  expensive: ["ollama-expensive"]
+  # Unified shape (preferred). Alias `name` is what the router sends to LiteLLM.
+  cheap:
+    - name: ollama-cheap
+      litellm_model: ollama/llama3.2:1b
+      api_base: http://127.0.0.1:11434
+  expensive:
+    - name: ollama-expensive
+      litellm_model: ollama/llama3.2:3b
+      api_base: http://127.0.0.1:11434
+  # Legacy still works: cheap: ["mock-cheap"] with a separate litellm config,
+  # or mock mode with name-only entries (no litellm_model).
 
 router:
   strategy: heuristic_cost_first
