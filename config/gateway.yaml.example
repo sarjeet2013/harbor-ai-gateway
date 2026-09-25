@@ -19,11 +19,11 @@ models:
   # Unified shape (preferred). Alias `name` is what the router sends to LiteLLM.
   cheap:
     - name: ollama-cheap
-      litellm_model: ollama/llama3.2:1b
+      litellm_model: ollama_chat/llama3.2:1b
       api_base: http://127.0.0.1:11434
   expensive:
     - name: ollama-expensive
-      litellm_model: ollama/llama3.2:3b
+      litellm_model: ollama_chat/llama3.2:3b
       api_base: http://127.0.0.1:11434
   # Legacy still works: cheap: ["mock-cheap"] with a separate litellm config,
   # or mock mode with name-only entries (no litellm_model).

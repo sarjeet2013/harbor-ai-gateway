@@ -37,3 +37,15 @@ OpenAI-style SSE on `POST /v1/chat/completions` with `"stream": true` (Cursor / 
 ## Out of scope for this note
 
 Hybrid Ollama/Grok routing. Semantic cache. Judge routing.
+
+## Troubleshooting (Ollama stream)
+
+If `./scripts/smoke.sh` fails the stream section with LiteLLM errors mentioning `async_generator` or `async_get_ollama_response_stream`, upgrade LiteLLM in the venv:
+
+```bash
+pip install -U -r requirements-litellm.txt
+# or: pip install -U 'litellm[proxy]>=1.72' async_generator
+python -m edge stop && python -m edge start
+```
+
+Harbor defaults use the `ollama_chat/...` LiteLLM prefix (chat + SSE), not the legacy `ollama/...` completion prefix.

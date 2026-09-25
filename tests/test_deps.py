@@ -176,10 +176,10 @@ def test_start_preflight_fails_before_config_gen_when_litellm_missing(
         "models:\n"
         "  cheap:\n"
         "    - name: ollama-cheap\n"
-        "      litellm_model: ollama/llama3.2:1b\n"
+        "      litellm_model: ollama_chat/llama3.2:1b\n"
         "  expensive:\n"
         "    - name: ollama-expensive\n"
-        "      litellm_model: ollama/llama3.2:3b\n"
+        "      litellm_model: ollama_chat/llama3.2:3b\n"
     )
     monkeypatch.setenv("GATEWAY_CONFIG", str(cfg))
 

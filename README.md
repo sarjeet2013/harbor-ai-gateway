@@ -61,7 +61,9 @@ pip install -r requirements.txt
 # REQUIRED for default config (upstream_mode: litellm / Ollama).
 # Skip only if you run mock mode (GATEWAY_CONFIG=config/gateway.mock.yaml).
 pip install -r requirements-litellm.txt
-# equivalent: pip install 'litellm[proxy]'
+# equivalent: pip install 'litellm[proxy]>=1.72' async_generator
+# If Ollama *streaming* fails with async_generator / async_get_ollama_*:
+#   pip install -U -r requirements-litellm.txt
 ```
 
 > **Default `config/gateway.yaml` is Ollama + LiteLLM.** Without `requirements-litellm.txt`,

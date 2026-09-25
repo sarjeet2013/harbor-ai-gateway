@@ -1,4 +1,9 @@
 # Optional — only for upstream_mode: litellm (Ollama / real providers).
 # Not required for mock mode. Install with core deps:
 #   pip install -r requirements.txt -r requirements-litellm.txt
-litellm[proxy]
+#
+# Pin: older litellm used a broken Ollama async-stream path
+# (async_generator / async_get_ollama_response_stream). >=1.72 uses
+# httpx streaming; 1.102.x verified with Harbor chat SSE.
+litellm[proxy]>=1.72.0,<2
+async_generator>=1.10  # transitive safety for any remaining async helpers

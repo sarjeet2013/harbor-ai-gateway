@@ -30,11 +30,11 @@ Confirm `config/gateway.yaml` has `upstream_mode: litellm` and unified pools:
 models:
   cheap:
     - name: ollama-cheap
-      litellm_model: ollama/llama3.2:1b
+      litellm_model: ollama_chat/llama3.2:1b
       api_base: http://127.0.0.1:11434
   expensive:
     - name: ollama-expensive
-      litellm_model: ollama/llama3.2:3b
+      litellm_model: ollama_chat/llama3.2:3b
       api_base: http://127.0.0.1:11434
 ```
 
