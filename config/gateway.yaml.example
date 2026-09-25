@@ -1,0 +1,13 @@
+# Edge + LiteLLM pointer (v0 sketch — implementation next)
+listen: "127.0.0.1:4000"
+litellm_base_url: "http://127.0.0.1:4001"
+daily_budget_usd: 10.0
+on_budget_exceeded: force_cheap  # or reject
+
+models:
+  cheap: ["ollama/llama3.2", "gpt-4o-mini"]
+  expensive: ["claude-sonnet-4", "gpt-4o"]
+
+router:
+  strategy: heuristic_cost_first
+  # rules filled in during implementation
