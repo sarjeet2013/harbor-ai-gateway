@@ -1,0 +1,28 @@
+# Default: edge in mock mode (no API keys).
+# Full stack: docker compose --profile litellm up --build
+services:
+  edge:
+    build: .
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./data:/app/data
+    environment:
+      GATEWAY_CONFIG: /app/config/gateway.yaml
+
+  litellm:
+    profiles: ["litellm"]
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "4001:4000"
+    volumes:
+      - ./config/litellm_config.yaml:/app/config.yaml:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-not-set}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-not-set}
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]

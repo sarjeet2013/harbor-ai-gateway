@@ -3,3 +3,9 @@
 *.key
 __pycache__/
 .venv/
+*.pyc
+.pytest_cache/
+logs/*
+!logs/.gitkeep
+data/*
+!data/.gitkeep

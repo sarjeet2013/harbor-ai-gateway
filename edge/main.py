@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+import os
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
+
+from .budget import DayBudget
+from .config import GatewayConfig, load_config
+from .mock_upstream import mock_anthropic_message, mock_chat_completion, mock_responses
+from .proxy import LiteLLMProxy
+from .router import pick_model
+from .why_log import WhyLog
+
+
+def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
+    config = cfg or load_config()
+    budget = DayBudget(config)
+    why = WhyLog(config.why_log_path)
+    proxy = LiteLLMProxy(config.litellm_base_url)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+
+    app = FastAPI(title="local-llm-gateway", version="0.1.0", lifespan=lifespan)
+    app.state.config = config
+    app.state.budget = budget
+    app.state.why = why
+
+    @app.get("/healthz")
+    async def healthz() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "upstream_mode": config.upstream_mode,
+            "budget": budget.snapshot(),
+        }
+
+    @app.get("/v1/budget")
+    async def get_budget() -> dict[str, Any]:
+        return budget.snapshot()
+
+    async def _handle(
+        request: Request,
+        *,
+        surface: str,
+        path: str,
+        mock_fn,
+    ) -> Response:
+        try:
+            body: dict[str, Any] = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+        client_model = body.get("model")
+        action, spent, remaining = budget.check()
+        if action == "reject":
+            why.write(
+                {
+                    "surface": surface,
+                    "model": client_model,
+                    "reason": "budget_reject",
+                    "status": "rejected",
+                    "spent_usd": spent,
+                    "remaining_usd": remaining,
+                }
+            )
+            return JSONResponse(
+                {
+                    "error": {
+                        "type": "budget_exceeded",
+                        "message": (
+                            f"Daily budget ${config.daily_budget_usd} exceeded "
+                            f"(spent ${spent:.4f})."
+                        ),
+                        "spent_usd": spent,
+                        "daily_budget_usd": config.daily_budget_usd,
+                    }
+                },
+                status_code=429,
+            )
+
+        decision = pick_model(
+            body,
+            config,
+            force_cheap=(action == "force_cheap"),
+            client_model=client_model if isinstance(client_model, str) else None,
+        )
+        body = {**body, "model": decision.model}
+
+        est = (
+            config.cost_estimates_usd.cheap_per_request
+            if decision.pool == "cheap"
+            else config.cost_estimates_usd.expensive_per_request
+        )
+
+        status_code = 200
+        result: dict[str, Any] | str
+        if config.upstream_mode == "mock":
+            result = mock_fn(body, decision.model)
+            status = "ok"
+        else:
+            headers = {k: v for k, v in request.headers.items()}
+            status_code, result = await proxy.forward(
+                "POST", path, json_body=body, headers=headers
+            )
+            status = "ok" if status_code < 400 else "upstream_error"
+
+        cost = est
+        if isinstance(result, dict):
+            usage = result.get("usage") or {}
+            # Prefer explicit cost if LiteLLM added it
+            if "cost" in result:
+                try:
+                    cost = float(result["cost"])
+                except (TypeError, ValueError):
+                    pass
+            tokens = {
+                "prompt": usage.get("prompt_tokens") or usage.get("input_tokens"),
+                "completion": usage.get("completion_tokens") or usage.get("output_tokens"),
+                "total": usage.get("total_tokens"),
+            }
+        else:
+            tokens = {}
+
+        if status == "ok":
+            budget.record(cost)
+
+        why.write(
+            {
+                "surface": surface,
+                "model": decision.model,
+                "pool": decision.pool,
+                "reason": decision.reason,
+                "client_model": client_model,
+                "status": status,
+                "status_code": status_code,
+                "tokens": tokens,
+                "cost_usd": cost,
+                "spent_usd": budget.snapshot()["spent_usd"],
+            }
+        )
+
+        if isinstance(result, str):
+            return Response(content=result, status_code=status_code, media_type="text/plain")
+        return JSONResponse(result, status_code=status_code)
+
+    @app.post("/v1/chat/completions")
+    async def chat_completions(request: Request) -> Response:
+        return await _handle(
+            request,
+            surface="openai.chat.completions",
+            path="/v1/chat/completions",
+            mock_fn=mock_chat_completion,
+        )
+
+    @app.post("/v1/messages")
+    async def anthropic_messages(request: Request) -> Response:
+        # Claude Code / Anthropic SDK hit /v1/messages (base URL without /v1)
+        return await _handle(
+            request,
+            surface="anthropic.messages",
+            path="/v1/messages",
+            mock_fn=mock_anthropic_message,
+        )
+
+    @app.post("/v1/responses")
+    async def openai_responses(request: Request) -> Response:
+        # Codex wire_api=responses
+        return await _handle(
+            request,
+            surface="openai.responses",
+            path="/v1/responses",
+            mock_fn=mock_responses,
+        )
+
+    # LiteLLM Cursor path: clients may call /cursor/...; proxy through when litellm mode
+    @app.api_route("/cursor/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+    async def cursor_proxy(full_path: str, request: Request) -> Response:
+        if config.upstream_mode == "mock":
+            return JSONResponse(
+                {
+                    "error": (
+                        "Cursor attach needs upstream_mode=litellm and a public HTTPS tunnel; "
+                        "mock mode has no /cursor protocol. See config/clients/cursor.env.example"
+                    )
+                },
+                status_code=501,
+            )
+        body = None
+        if request.method in ("POST", "PUT", "PATCH"):
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+        status_code, result = await proxy.forward(
+            request.method,
+            f"/cursor/{full_path}",
+            json_body=body,
+            headers={k: v for k, v in request.headers.items()},
+        )
+        if isinstance(result, str):
+            return Response(content=result, status_code=status_code)
+        return JSONResponse(result, status_code=status_code)
+
+    return app
+
+
+app = create_app()
+
+
+def main() -> None:
+    import uvicorn
+
+    cfg = load_config()
+    # Allow override via env for docker
+    host = os.environ.get("GATEWAY_HOST", cfg.host)
+    port = int(os.environ.get("GATEWAY_PORT", str(cfg.port)))
+    uvicorn.run("edge.main:app", host=host, port=port, reload=False)
+
+
+if __name__ == "__main__":
+    main()

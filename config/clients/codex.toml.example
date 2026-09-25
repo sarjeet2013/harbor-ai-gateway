@@ -3,11 +3,14 @@
 
 openai_base_url = "http://127.0.0.1:4000/v1"
 
-# Optional: named provider instead of overriding built-in openai:
-# model = "cheap-default"
+# Preferred: named provider with Responses wire API (Codex default path)
+# model = "mock-cheap"
 # model_provider = "local_gateway"
 #
 # [model_providers.local_gateway]
 # name = "local-llm-gateway"
 # base_url = "http://127.0.0.1:4000/v1"
 # env_key = "LOCAL_GATEWAY_API_KEY"
+# wire_api = "responses"
+#
+# Edge implements POST /v1/responses for this path (plus /v1/chat/completions).

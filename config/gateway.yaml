@@ -1,0 +1,32 @@
+# Working v0 config (mock upstream — no real API keys required)
+listen: "0.0.0.0:4000"
+litellm_base_url: "http://127.0.0.1:4001"
+upstream_mode: mock  # mock | litellm
+
+daily_budget_usd: 10.0
+on_budget_exceeded: force_cheap  # force_cheap | reject
+budget_state_path: "data/budget.json"
+
+why_log_path: "logs/why.jsonl"
+
+# Rough USD estimates used for budget accounting (mock + when upstream omits cost)
+cost_estimates_usd:
+  cheap_per_request: 0.001
+  expensive_per_request: 0.02
+
+models:
+  cheap: ["mock-cheap", "gpt-4o-mini", "ollama/llama3.2"]
+  expensive: ["mock-expensive", "claude-sonnet-4", "gpt-4o"]
+
+router:
+  strategy: heuristic_cost_first
+  # Prefer expensive if any of these match (case-insensitive) in the prompt text
+  expensive_keywords:
+    - "refactor"
+    - "architecture"
+    - "design a system"
+    - "complex"
+    - "analyze the entire"
+    - "write a detailed"
+  # Prefer expensive if estimated prompt chars exceed this
+  expensive_min_chars: 2000
