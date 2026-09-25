@@ -35,7 +35,7 @@ models:
       api_base: http://127.0.0.1:11434
 ```
 
-**Do not edit `config/litellm_config.yaml`.** The CLI generates `config/.generated_litellm.yaml`.
+**Do not edit `config/litellm_config.yaml`.** The CLI generates `config/.generated_litellm.yaml` (override path with `GATEWAY_LITELLM_CONFIG`).
 
 ### Cloud API keys
 
@@ -56,7 +56,7 @@ python -m edge stop
 # Foreground (Ctrl+C stops both)
 python -m edge start
 
-# Or background
+# Or background (-d is the short form of --detach)
 python -m edge start --detach
 python -m edge status
 python -m edge stop
@@ -73,7 +73,8 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"ollama-cheap","messages":[{"role":"user","content":"Say hi in one short sentence."}],"max_tokens":64}'
 
-# Expensive path (keyword trigger)
+# Expensive path (keyword trigger). "auto" is not a registered alias —
+# the router picks the expensive pool head (ollama-expensive) from gateway.yaml.
 curl -s http://127.0.0.1:4000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"auto","messages":[{"role":"user","content":"Please refactor this architecture and design a system."}],"max_tokens":64}'

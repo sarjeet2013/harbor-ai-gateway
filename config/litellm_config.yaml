@@ -1,6 +1,7 @@
 # DEPRECATED — do not hand-edit.
 #
-# Model aliases now live in config/gateway.yaml under `models:`.
+# Model aliases now live in config/gateway.yaml under `models:`
+#   (each entry: name + litellm_model + api_base).
 # `python -m edge start` generates config/.generated_litellm.yaml from that file.
 #
 # Override path only if needed:
