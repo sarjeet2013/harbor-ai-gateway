@@ -87,7 +87,7 @@ def _warn_cloud_keys(cfg: GatewayConfig) -> None:
 
 
 def _find_litellm_cmd() -> list[str]:
-    # Prefer `litellm` on PATH (venv), else python -m litellm (when importable).
+    # Always same-interpreter: python -m edge.litellm_cli (see edge.deps).
     cmd = resolve_litellm_cmd()
     if cmd is None:
         raise SystemExit(format_litellm_missing_message())
@@ -115,7 +115,11 @@ def _start_litellm(cfg: GatewayConfig, litellm_cfg: Path, *, detach: bool) -> su
         return subprocess.Popen(cmd, **popen_kwargs)
     except FileNotFoundError as e:
         raise SystemExit(
-            "litellm not found. Install with: pip install 'litellm[proxy]'\n"
+            "Failed to launch LiteLLM with this interpreter.\n"
+            f"  tried: {cmd!r}\n"
+            "Install / repair with:\n"
+            "  pip install -r requirements-litellm.txt\n"
+            "  # or: pip install --force-reinstall 'litellm[proxy]'\n"
             f"detail: {e}"
         ) from e
 
@@ -484,6 +488,9 @@ def cmd_doctor(_args: argparse.Namespace | None = None) -> int:
             print(format_litellm_missing_message(), file=sys.stderr)
             return 1
         print(preflight_ok_message(litellm_checked=True))
+        cmd = resolve_litellm_cmd()
+        if cmd:
+            print(f"LiteLLM launch: {' '.join(cmd)}")
         return 0
     # mock (or other): litellm optional
     print(preflight_ok_message(litellm_checked=False))

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import importlib
 import sys
-from shutil import which
 from typing import Iterable, Mapping
 
 # import_name -> pip install name (as shown to the user)
@@ -97,18 +96,25 @@ def litellm_importable() -> bool:
         return False
 
 
+def litellm_proxy_importable() -> bool:
+    """True if LiteLLM's proxy CLI entry (run_server) can be imported."""
+    try:
+        importlib.import_module("litellm.proxy.proxy_cli")
+        return True
+    except ImportError:
+        return False
+
+
 def resolve_litellm_cmd() -> list[str] | None:
     """Return argv prefix to launch LiteLLM, or None if not resolvable.
 
-    Requires the litellm package to import in *this* interpreter, then prefers
-    `litellm` on PATH (venv scripts), else ``python -m litellm``.
+    Always launches via *this* interpreter (``python -m edge.litellm_cli``) so a
+    stale ``.venv/bin/litellm`` console-script shebang cannot break ``start``
+    while ``import litellm`` still succeeds for ``doctor``.
     """
-    if not litellm_importable():
+    if not litellm_importable() or not litellm_proxy_importable():
         return None
-    litellm_bin = which("litellm")
-    if litellm_bin:
-        return [litellm_bin]
-    return [sys.executable, "-m", "litellm"]
+    return [sys.executable, "-m", "edge.litellm_cli"]
 
 
 def litellm_ready() -> bool:
@@ -120,8 +126,11 @@ def format_litellm_missing_message() -> str:
     return (
         "LiteLLM is required for upstream_mode: litellm "
         "(default Ollama gateway.yaml), but it is not available.\n"
-        f"  - import litellm: {'OK' if litellm_importable() else 'MISSING'}\n"
-        f"  - litellm CLI:    {'OK' if resolve_litellm_cmd() else 'MISSING'}\n"
+        f"  - import litellm:              {'OK' if litellm_importable() else 'MISSING'}\n"
+        f"  - import litellm.proxy.proxy_cli: "
+        f"{'OK' if litellm_proxy_importable() else 'MISSING'}\n"
+        f"  - launch cmd (python -m edge.litellm_cli): "
+        f"{'OK' if resolve_litellm_cmd() else 'MISSING'}\n"
         f"{LITELLM_INSTALL_HINT}"
     )
 

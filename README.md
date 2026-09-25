@@ -67,7 +67,7 @@ pip install -r requirements-litellm.txt
 > **Default `config/gateway.yaml` is Ollama + LiteLLM.** Without `requirements-litellm.txt`,
 > `python -m edge start` / `doctor` fail *before* generating config — no late surprise.
 
-Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing; also checks LiteLLM when `upstream_mode` is `litellm`).
+Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing; also checks LiteLLM when `upstream_mode` is `litellm`). LiteLLM is launched as `python -m edge.litellm_cli` (same interpreter as the edge CLI) so a stale `.venv/bin/litellm` shebang cannot break `start` while `doctor` still passes.
 
 ```bash
 # Check aliases that will be sent to LiteLLM (catches missing litellm_model)

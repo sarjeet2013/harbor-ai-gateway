@@ -103,16 +103,22 @@ def test_ensure_litellm_ok_when_import_and_cli_present():
     assert cmd == [sys.executable, "-m", "litellm"]
 
 
-def test_resolve_litellm_cmd_none_when_missing(monkeypatch):
-    monkeypatch.setattr("edge.deps.which", lambda _name: None)
+def test_resolve_litellm_cmd_none_when_missing():
     with patch("edge.deps.litellm_importable", return_value=False):
         assert resolve_litellm_cmd() is None
 
 
-def test_resolve_litellm_cmd_prefers_path_binary(monkeypatch):
-    monkeypatch.setattr("edge.deps.which", lambda _name: "/fake/bin/litellm")
+def test_resolve_litellm_cmd_uses_this_interpreter(monkeypatch):
+    """Prefer python -m edge.litellm_cli over a (possibly stale) console script."""
     with patch("edge.deps.litellm_importable", return_value=True):
-        assert resolve_litellm_cmd() == ["/fake/bin/litellm"]
+        with patch("edge.deps.litellm_proxy_importable", return_value=True):
+            assert resolve_litellm_cmd() == [sys.executable, "-m", "edge.litellm_cli"]
+
+
+def test_resolve_litellm_cmd_none_when_proxy_cli_missing():
+    with patch("edge.deps.litellm_importable", return_value=True):
+        with patch("edge.deps.litellm_proxy_importable", return_value=False):
+            assert resolve_litellm_cmd() is None
 
 
 def test_format_litellm_missing_message_has_install_line():
