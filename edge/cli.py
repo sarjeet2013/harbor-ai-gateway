@@ -1,8 +1,9 @@
-"""CLI: python -m edge {start|stop|status|config-check|cache-stats|doctor|models}"""
+"""CLI: python -m edge {start|stop|status|config-check|cache-stats|doctor|models} (+ Admin UI at /admin)"""
 
 from __future__ import annotations
 
 import argparse
+import webbrowser
 import json
 import os
 import signal
@@ -417,6 +418,20 @@ def _require_gateway_yaml() -> Path | None:
     return path
 
 
+
+def _maybe_open_admin(cfg: GatewayConfig, *, open_browser: bool) -> None:
+    """Optionally open the mini Admin UI in the default browser (loopback URL)."""
+    if not open_browser:
+        return
+    # Always advertise loopback — admin mutations are localhost-only.
+    port = int(os.environ.get("GATEWAY_PORT", str(cfg.port)))
+    url = f"http://127.0.0.1:{port}/admin"
+    try:
+        webbrowser.open(url)
+    except Exception as e:
+        print(f"warning: could not open browser ({e}); open {url} manually", file=sys.stderr)
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     ensure_deps()
     missing = _require_gateway_yaml()
@@ -510,6 +525,11 @@ def cmd_start(args: argparse.Namespace) -> int:
     if litellm_proc:
         print(f"litellm pid={litellm_proc.pid}  log={LITELLM_LOG}")
     print(f"pidfile={PID_PATH}")
+    print(f"admin UI: http://127.0.0.1:{cfg.port}/admin")
+    _maybe_open_admin(
+        cfg,
+        open_browser=bool(getattr(args, "open_browser", False) or cfg.admin.open_browser),
+    )
 
     if args.detach:
         print("detached. stop with: python -m edge stop")
@@ -790,6 +810,11 @@ def build_parser() -> argparse.ArgumentParser:
         "-d",
         action="store_true",
         help="run in background (write pidfile and exit)",
+    )
+    start_p.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="open http://127.0.0.1:<port>/admin after edge is up (also: admin.open_browser in YAML)",
     )
     start_p.set_defaults(func=cmd_start)
 

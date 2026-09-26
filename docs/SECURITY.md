@@ -23,3 +23,10 @@ Harbor does **not** forward that header to LiteLLM/providers. Cloud auth uses on
 
 - Default listen is `0.0.0.0:4000` (LAN-reachable). Bind to `127.0.0.1:4000` in `config/gateway.yaml` if you only want loopback.
 - Cursor attach via a public HTTPS tunnel exposes your edge to the internet — treat the tunnel URL like a credential and stop the tunnel when unused.
+
+## Admin UI
+
+- The mini Admin UI is served from the edge at `/admin` (same listen address as the gateway).
+- **Mutating** admin API routes (`POST /admin/api/settings`) refuse non-loopback clients (`127.0.0.1` / `::1`) by default. There is no separate public admin port.
+- Frontier keys entered in the UI are written to repo `.env` only — never to `gateway.yaml`. The API returns set/unset booleans, never key values.
+- Prefer opening `http://127.0.0.1:<port>/admin` on the host running Harbor. Details: [features/admin-ui.md](features/admin-ui.md).

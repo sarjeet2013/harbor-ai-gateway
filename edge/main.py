@@ -34,6 +34,7 @@ from .translate import (
     responses_to_chat,
 )
 from .ledger import Ledger
+from .admin import mount_admin
 
 # Surfaces that support streaming in v1
 _CHAT_SURFACE = "openai.chat.completions"
@@ -100,6 +101,8 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     app.state.budget = budget
     app.state.ledger = ledger
     app.state.cache = cache
+
+    mount_admin(app)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:

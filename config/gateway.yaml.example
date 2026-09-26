@@ -117,3 +117,7 @@ cache:
   # last_user helps agent loops (Claude Code): embed last user only (not full history/system).
   # Exact hash remains full-request. Filter requires matching system_fingerprint + sampling/tools.
   semantic_scope: last_user   # full | last_user
+
+# Mini Admin UI (http://127.0.0.1:<port>/admin). Mutations are localhost-only.
+# admin:
+#   open_browser: true   # also: python -m edge start --open-browser

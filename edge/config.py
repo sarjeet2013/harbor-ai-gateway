@@ -116,6 +116,13 @@ class CacheConfig(BaseModel):
     semantic_scope: str = "full"  # full | last_user
 
 
+class AdminConfig(BaseModel):
+    """Mini Admin UI options (see docs/features/admin-ui.md)."""
+
+    # When true, `python -m edge start` opens http://127.0.0.1:<port>/admin
+    open_browser: bool = False
+
+
 class GatewayConfig(BaseModel):
     listen: str = "0.0.0.0:4000"
     litellm_host: str = "127.0.0.1"
@@ -131,6 +138,7 @@ class GatewayConfig(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
+    admin: AdminConfig = Field(default_factory=AdminConfig)
 
     @model_validator(mode="before")
     @classmethod
@@ -178,3 +186,29 @@ def load_config(path: str | Path | None = None) -> GatewayConfig:
         with cfg_path.open() as f:
             raw = yaml.safe_load(f) or {}
     return GatewayConfig.model_validate(raw)
+
+
+def default_config_path() -> Path:
+    """Resolved path to gateway.yaml (GATEWAY_CONFIG or config/gateway.yaml)."""
+    cfg_path = Path(
+        os.environ.get("GATEWAY_CONFIG", repo_root() / "config" / "gateway.yaml")
+    )
+    if not cfg_path.is_absolute():
+        cfg_path = repo_root() / cfg_path
+    return cfg_path
+
+
+def save_raw_config(raw: dict[str, Any], path: str | Path | None = None) -> Path:
+    """Write gateway YAML from a raw dict.
+
+    Uses PyYAML ``safe_dump`` — **inline comments are not preserved** (same as
+    ``python -m edge models set``). Prefer ``config/gateway.yaml.example`` when
+    you need the annotated template.
+    """
+    from .models_yaml import dump_raw_yaml
+
+    cfg_path = Path(path) if path else default_config_path()
+    if not cfg_path.is_absolute():
+        cfg_path = repo_root() / cfg_path
+    dump_raw_yaml(cfg_path, raw)
+    return cfg_path

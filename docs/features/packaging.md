@@ -1,6 +1,6 @@
 # Feature: Packaging & distribution
 
-**Status:** **Planned (design only).** Not implemented yet. Today Harbor runs from a git checkout (or local copy) with a Python venv: `pip install -r requirements.txt` and `python -m edge start`. A `Dockerfile` / `docker-compose.yml` exist at the repo root but are not yet the polished first-class release path (no published GHCR image workflow documented here as shipping).
+**Status:** **Planned (design only).** Not implemented yet. **Admin UI prioritized; packaging revisited later** (see [admin-ui.md](admin-ui.md)). Today Harbor runs from a git checkout (or local copy) with a Python venv: `pip install -r requirements.txt` and `python -m edge start`. A `Dockerfile` / `docker-compose.yml` exist at the repo root but are not yet the polished first-class release path (no published GHCR image workflow documented here as shipping).
 
 This document is the packaging plan for making Harbor usable **without** requiring every user to clone and wire dependencies by hand — while keeping **Ollama external** (any reachable host via `api_base`).
 

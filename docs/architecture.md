@@ -22,6 +22,7 @@ Security: [SECURITY.md](SECURITY.md). Source of truth: `config/gateway.yaml` + `
 | --- | --- |
 | `GET /healthz` | Health + budget snapshot (+ cache stats) |
 | `GET /v1/budget` | Day spend snapshot |
+| `GET /admin` · `/admin/api/settings` | Mini Admin UI + settings JSON (**shipped** — [features/admin-ui.md](features/admin-ui.md)); mutations localhost-only |
 | `POST /v1/chat/completions` | OpenAI Chat Completions (incl. `stream: true` SSE) |
 | `POST /v1/messages` | Anthropic Messages (Claude Code; incl. `stream: true` SSE); in `litellm` mode edge translates ↔ chat/completions |
 | `POST /v1/responses` | OpenAI Responses (Codex `wire_api=responses`); in `litellm` mode edge translates ↔ chat/completions |
@@ -33,6 +34,7 @@ Security: [SECURITY.md](SECURITY.md). Source of truth: `config/gateway.yaml` + `
 | --- | --- |
 | `python -m edge start` | Generate LiteLLM YAML; start LiteLLM (if litellm mode) + edge; foreground |
 | `python -m edge start --detach` (`-d`) | Same, background (`data/gateway.pid`) |
+| `python -m edge start --open-browser` | After start, open `http://127.0.0.1:<port>/admin` |
 | `python -m edge stop` | Stop via pidfile / ports |
 | `python -m edge status` | Ports, pids, `upstream_mode`, model pools |
 | `python -m edge config-check` | Print resolved aliases → `litellm_model` |
@@ -73,10 +75,12 @@ Same path for all clients once traffic hits the edge: clients → edge `:4000` �
 
 ## Planned (not yet shipped)
 
-- **Packaging / distribution** — Docker/GHCR, pipx, native release binaries; see [features/packaging.md](features/packaging.md).
+- **Packaging / distribution** — Docker/GHCR, pipx, native release binaries; see [features/packaging.md](features/packaging.md). **Admin UI prioritized; packaging revisited later.**
 
 - **Responses streaming** — chat + Anthropic messages SSE (incl. cache hit replay / miss tee-store) ship; OpenAI `/v1/responses` with `stream: true` still returns 501. See [features/streaming.md](features/streaming.md).
 
 ## Shipped recently
+
+- **Mini Admin UI** — `/admin` browser config for models, cache, router, frontier `.env` keys; localhost-only mutations. See [features/admin-ui.md](features/admin-ui.md).
 
 - **Intelligent / judge routing** — live default in `gateway.yaml` (`judge_then_heuristic`); heuristic is fallback only. Judge runs in the router **before** cache (model identity aligned with cache key). See [features/routing.md](features/routing.md).

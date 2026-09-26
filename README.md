@@ -17,6 +17,7 @@ Works anywhere you have **Python 3**, optional **Ollama** (local or remote), and
 | Hybrid pools (Ollama cheap + OpenAI expensive) | **Shipped** | [docs/features/hybrid.md](docs/features/hybrid.md) |
 | Streaming SSE (chat + Anthropic messages) | **Shipped** | [docs/features/streaming.md](docs/features/streaming.md) |
 | Cursor attach (`/cursor` + HTTPS tunnel) | **Shipped** | [docs/features/cursor.md](docs/features/cursor.md) |
+| Mini Admin UI (`/admin`) | **Shipped** | [docs/features/admin-ui.md](docs/features/admin-ui.md) |
 | Claude Code / Codex surfaces (`/v1/messages`, `/v1/responses`) | **Shipped** | [architecture](docs/architecture.md) |
 | OpenAI `/v1/responses` streaming | Planned (501 today) | [streaming](docs/features/streaming.md) |
 
