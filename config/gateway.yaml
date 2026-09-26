@@ -58,10 +58,10 @@ router:
 # Response cache (exact shipping; set mode: semantic after nomic-embed-text on Mini)
 cache:
   enabled: true
-  mode: exact   # exact | semantic (keep exact until embed model verified)
+  mode: semantic   # exact | semantic
   ttl_seconds: 86400
   max_entries: 1000
   path: data/cache
   embedding_model: nomic-embed-text
-  # embedding_api_base: http://192.168.4.31:11434  # default: cheap pool api_base
+  embedding_api_base: http://192.168.4.31:11434
   similarity_threshold: 0.92
