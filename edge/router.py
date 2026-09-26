@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from .config import GatewayConfig
-from .judge import JudgeResult, run_judge
+from .judge import JudgeResult, last_user_text, run_judge
 
 _JUDGE_STRATEGIES = frozenset({"judge_then_heuristic", "judge"})
 
@@ -33,54 +33,17 @@ class RouteDecision:
 
 
 def _extract_text(body: dict[str, Any], *, include_system: bool = False) -> str:
-    """Text used for heuristic routing.
+    """Text used for heuristic routing: **last user turn only**.
 
-    Default skips Anthropic/OpenAI system prompts: Claude Code (and similar
-    agents) inject large system instructions that contain words like
-    "refactor" / "architecture" and would falsely force the expensive pool.
+    Matches the judge (`last_user_text`): prior user/assistant history and
+    system prompts must not drive expensive_min_chars or task-class keywords
+    (Claude Code multi-turn sessions otherwise grow into false expensive/coder).
+
+    ``include_system`` is accepted for API compatibility but ignored — system
+    is never scored for heuristics.
     """
-    parts: list[str] = []
-    # OpenAI chat / Anthropic messages — user (+ assistant) turns only by default
-    for m in body.get("messages") or []:
-        if not isinstance(m, dict):
-            continue
-        role = (m.get("role") or "").lower()
-        if role == "system" and not include_system:
-            continue
-        c = m.get("content")
-        if isinstance(c, str):
-            parts.append(c)
-        elif isinstance(c, list):
-            for block in c:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(str(block.get("text", "")))
-                elif isinstance(block, str):
-                    parts.append(block)
-    # Responses API
-    inp = body.get("input")
-    if isinstance(inp, str):
-        parts.append(inp)
-    elif isinstance(inp, list):
-        for item in inp:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                c = item.get("content")
-                if isinstance(c, str):
-                    parts.append(c)
-                elif isinstance(c, list):
-                    for block in c:
-                        if isinstance(block, dict) and "text" in block:
-                            parts.append(str(block["text"]))
-    if include_system:
-        sys = body.get("system")
-        if isinstance(sys, str):
-            parts.append(sys)
-        elif isinstance(sys, list):
-            for block in sys:
-                if isinstance(block, dict) and "text" in block:
-                    parts.append(str(block["text"]))
-    return "\n".join(parts)
+    _ = include_system  # intentionally unused
+    return last_user_text(body)
 
 
 def _keyword_hit(lower: str, keywords: list[str]) -> bool:

@@ -41,6 +41,8 @@ Ledger optional extras when the judge ran: `judge_ms`, `judge_label`, `judge_con
 
 ## Heuristic rails (fallback)
 
+Heuristic keyword / length scoring uses the **last user turn only** (same helper as the judge: `last_user_text`). Prior user/assistant history and system prompts are **not** counted toward `expensive_min_chars` or task-class keywords — so a short “hi” / “good morning” after a long Claude Code session stays on `default_cheap_model` unless the **latest** user text itself triggers a rail.
+
 | Match | Pool / alias | Reason |
 | --- | --- | --- |
 | `expensive_keywords` / `expensive_min_chars` | expensive | `heuristic:expensive_*` |
