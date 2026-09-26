@@ -98,3 +98,8 @@ tail -n 5 logs/ledger.jsonl
 ```
 
 See also [docs/features/hybrid.md](docs/features/hybrid.md) and [docs/SECURITY.md](docs/SECURITY.md).
+
+## Docker
+
+When Harbor runs in Docker and Ollama on the host, use `host.docker.internal:11434` as `api_base` (see `config/gateway.docker.yaml.example`). Compose sets `extra_hosts: host.docker.internal:host-gateway` so that hostname resolves on Linux. Ensure Ollama listens beyond loopback if needed (`OLLAMA_HOST=0.0.0.0:11434`). Full steps: [README](README.md) Option A and [docs/features/packaging.md](docs/features/packaging.md).
+

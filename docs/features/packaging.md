@@ -1,8 +1,15 @@
 # Feature: Packaging & distribution
 
-**Status:** **Planned (design only).** Not implemented yet. **Admin UI prioritized; packaging revisited later** (see [admin-ui.md](admin-ui.md)). Today Harbor runs from a git checkout (or local copy) with a Python venv: `pip install -r requirements.txt` and `python -m edge start`. A `Dockerfile` / `docker-compose.yml` exist at the repo root but are not yet the polished first-class release path (no published GHCR image workflow documented here as shipping).
+**Status:** **Phase 1 shipped (Docker / GHCR).** pipx and native binaries remain planned. Admin UI is shipped (see [admin-ui.md](admin-ui.md)). Today Harbor runs from:
 
-This document is the packaging plan for making Harbor usable **without** requiring every user to clone and wire dependencies by hand — while keeping **Ollama external** (any reachable host via `api_base`).
+| Path | Status |
+| --- | --- |
+| **Source (venv)** | Shipped — `pip install -r requirements*.txt` + `python -m edge start` |
+| **Docker** | **Shipped** — `docker compose up` / `ghcr.io/sarjeet2013/harbor-ai-gateway` |
+| **pip / pipx** | Planned (Phase 2) |
+| **Native binary** | Planned (Phase 3) |
+
+Ollama stays **external** (any reachable host via `api_base`). No secrets in the image.
 
 ## What “run locally” means
 
@@ -12,7 +19,7 @@ Harbor is not a single static inference binary. A distribution must include or i
 | --- | --- |
 | **Edge** | Harbor FastAPI app (`edge/`) — budget, router, cache, ledger, translate |
 | **LiteLLM** | Upstream proxy (typically managed child on `:4001`) |
-| **Config** | `gateway.yaml` (from `gateway.yaml.example` on first run) |
+| **Config** | `gateway.yaml` (from `gateway.yaml.example` / `gateway.docker.yaml.example` on first run) |
 | **Runtime dirs** | `data/` (budget, cache, pid), `logs/` (ledger, process logs) |
 | **Ollama** | **Not bundled** — user installs Ollama (or points at any OpenAI-compatible Ollama URL) |
 | **Provider keys** | Optional `OPENAI_API_KEY` (etc.) via env / `.env` — never baked into artifacts |
@@ -32,101 +39,98 @@ Do not skip rungs: each phase is a usable distribution channel on its own.
 
 ### Phase 0 — Docs truth (prerequisite)
 
-- Install matrix in README: **source (venv)** · **Docker** · **pip/pipx** · **native binary (later)**
+- Install matrix in README: **source (venv)** · **Docker** · **pip/pipx (later)** · **native binary (later)**
 - Default examples use `http://127.0.0.1:11434`; document that `api_base` / `embedding_api_base` / judge `api_base` may point at any reachable Ollama
-- This phase is largely covered by the OSS-facing README and feature docs; packaging.md is the distribution roadmap
+- **Done** via README + feature docs
 
-### Phase 1 — Docker as first-class “download and run” *(fastest public win)*
+### Phase 1 — Docker as first-class “download and run” — **SHIPPED**
 
-Harden existing Docker assets and publish an image:
+Harden Docker assets and publish an image:
 
-- `docker compose up` publishes edge `:4000`, persists `data/` + `logs/`, mounts config
-- Publish image to **GHCR** (e.g. `ghcr.io/<org>/harbor-ai-gateway`) on version tags via GitHub Actions
-- Compose examples for Ollama on the host:
-  - Docker Desktop: `host.docker.internal:11434`
-  - Linux: `host-gateway` / `extra_hosts` documented explicitly
-- No secrets in the image; optional `.env` bind-mount
+- One service runs `python -m edge start` (foreground): edge `:4000` + managed LiteLLM `:4001` inside the container
+- `docker compose up` publishes `:4000`, persists `data/` + `logs/`, mounts `config/`
+- Image: **`ghcr.io/sarjeet2013/harbor-ai-gateway`** (GitHub Actions on `v*` tags, `main`, and `workflow_dispatch`)
+- Host Ollama:
+  - Docker Desktop: `http://host.docker.internal:11434` (`config/gateway.docker.yaml.example`)
+  - Linux: compose `extra_hosts: host.docker.internal:host-gateway`
+- No secrets in the image; optional `.env` via compose `env_file`
+- First run seeds `config/gateway.yaml` from the Docker template when missing
+- Admin UI: `http://127.0.0.1:4000/admin` when port published; localhost mutation guard still applies from the host browser to the published port
 
-**Success criterion:** A new user with Docker + Ollama gets a chat completion through Harbor in under ~10 minutes with **no git clone**.
+**Success criterion:** A new user with Docker + Ollama gets a chat completion through Harbor in under ~10 minutes with **no git clone** (pull image + compose + seed config).
 
-### Phase 2 — `pip install` / `pipx` *(best cross-OS Python path)*
+#### How to run (Phase 1)
 
-- Add a real `pyproject.toml` with a console script, e.g. `harbor` → same CLI surface as `python -m edge` (`start`, `stop`, `status`, `doctor`, `models`, `cache-stats`, …)
+**From a clone (local build):**
+
+```bash
+cp .env.example .env   # optional OPENAI_API_KEY
+docker compose up --build
+curl -s http://127.0.0.1:4000/healthz
+```
+
+**Pull published image (no clone required once you have compose + config dir):**
+
+```bash
+mkdir -p config data logs
+# optional: curl the compose file and gateway.docker.yaml.example from the repo
+docker pull ghcr.io/sarjeet2013/harbor-ai-gateway:latest
+docker compose up
+```
+
+If GHCR package visibility is private on first publish, log in:
+
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+```
+
+Tag a release to publish a semver image: `git tag v0.1.0 && git push origin v0.1.0`.
+
+### Phase 2 — `pip install` / `pipx` *(best cross-OS Python path)* — **planned**
+
+- Add a real `pyproject.toml` with a console script, e.g. `harbor` → same CLI surface as `python -m edge`
 - Publish to **PyPI** on version tags
 - `pipx install harbor-ai-gateway` then `harbor start`
 - Declare Python version floor (e.g. 3.11+); pin LiteLLM and runtime deps in package metadata
-- First run copies `gateway.yaml.example` → user config path if missing (same behavior as edge CLI today)
+- First run copies `gateway.yaml.example` → user config path if missing (same behavior as edge CLI / Docker today)
 
-**Success criterion:** No Docker required; still requires a Python toolchain. Primary path for developers who already use pipx.
+**Success criterion:** No Docker required; still requires a Python toolchain.
 
-### Phase 3 — Native executables (GitHub Releases)
+### Phase 3 — Native executables (GitHub Releases) — **planned**
 
-Per-OS artifacts attached to releases:
+Per-OS artifacts attached to releases (`harbor-macos-arm64`, `harbor-linux-x64`, …) via PyInstaller or Nuitka. See earlier design notes: artifact size (LiteLLM), Gatekeeper, config path resolution.
 
-| Artifact | Target |
-| --- | --- |
-| `harbor-macos-arm64` | Apple Silicon |
-| `harbor-macos-x64` | Intel macOS |
-| `harbor-linux-x64` | Linux x86_64 |
-| `harbor-windows-x64.exe` | Windows x64 |
-
-**Tooling (planned):** PyInstaller or Nuitka in CI (matrix build). Bundle edge + uvicorn stack + LiteLLM.
-
-**UX:**
-
-```text
-harbor start
-harbor start -d
-harbor stop
-harbor doctor
-```
-
-On first run, create config + `data/` + `logs/` beside the binary or under a user config dir (e.g. `~/.harbor/` — exact path TBD at implementation).
-
-**Known hard parts (call out before building):**
-
-- Artifact size: LiteLLM + deps often produce **hundreds of MB** (sometimes approaching ~1GB+)
-- Native dependency wheels (pydantic, tiktoken, etc.) per platform
-- Windows path length / firewall prompts
-- macOS Gatekeeper: unsigned downloads warn; **notarization** is phase 3b, not a v1 blocker for “works if user allows”
-- Config and template files must resolve correctly inside the frozen app
-
-**Success criterion:** Download release archive → `./harbor doctor` → `./harbor start` → `GET :4000/healthz` OK.
-
-**Kill / demote criterion:** If frozen artifacts regularly exceed ~1.5GB or cold start exceeds ~30s, keep **Docker + pipx as primary** and treat native binaries as best-effort.
+**Kill / demote criterion:** If frozen artifacts regularly exceed ~1.5GB or cold start exceeds ~30s, keep **Docker + pipx as primary**.
 
 ### Phase 4 — OS package managers (optional polish)
 
-Only after Phase 3 artifacts are stable:
+Only after Phase 3 artifacts are stable: Homebrew tap, winget / Scoop.
 
-- Homebrew tap (formula wrapping release binary or pipx)
-- winget / Scoop on Windows
-
-## Suggested repo layout (when implementation starts)
+## Layout (Phase 1)
 
 ```text
-packaging/
-  docker/            # optional consolidation of root Dockerfile/compose
-  pyinstaller/       # or nuitka/ specs
+Dockerfile
+docker-compose.yml
+docker-entrypoint.sh
+config/gateway.docker.yaml.example
+.github/workflows/docker-publish.yml
 docs/features/packaging.md   # this file
-.github/workflows/release.yml
-pyproject.toml               # Phase 2
 ```
 
-Root `Dockerfile` / `docker-compose.yml` may remain until Phase 1 consolidates them.
+Phase 2+ may add `pyproject.toml`, `packaging/pyinstaller/`, etc.
 
 ## Launch recommendation
 
-For a public launch, **advertise Docker + pip/pipx first**; list native Releases as follow-on. That matches “any OS with Docker or Python, plus Ollama somewhere” without blocking on notarization or giant binary QA.
+Advertise **Docker + source (venv)** first; list pipx and native Releases as follow-on.
 
 ## Implementation status
 
 | Phase | Status |
 | --- | --- |
-| 0 Docs / generic defaults | In progress via README + feature docs |
-| 1 Docker / GHCR | **Not started** (compose/Dockerfile exist as drafts) |
+| 0 Docs / generic defaults | **Done** |
+| 1 Docker / GHCR | **Shipped** |
 | 2 PyPI / pipx | **Not started** |
 | 3 Native binaries | **Not started** |
 | 4 Homebrew / winget | **Not started** |
 
-When a phase ships, update this table and the architecture “planned” section in the same PR.
+When a later phase ships, update this table and the architecture “planned” section in the same PR.

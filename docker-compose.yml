@@ -1,32 +1,36 @@
-# Default: edge in mock mode (no API keys).
-# Prefer host CLI: python -m edge start
-# First-time: cp config/gateway.yaml.example config/gateway.yaml
-# Full stack (legacy): docker compose --profile litellm up --build
-# litellm_config.yaml is deprecated — for Docker litellm profile, either
-# copy config/.generated_litellm.yaml over it after a CLI generate, or use the host CLI.
+# Harbor AI Gateway — Phase 1 happy path (edge + LiteLLM in one container).
+#
+# Quickstart (git clone):
+#   cp .env.example .env          # optional OPENAI_API_KEY for expensive pool
+#   docker compose up --build
+#   open http://127.0.0.1:4000/admin   # mutations: localhost-only from host browser
+#
+# Pull published image (no local build):
+#   docker compose pull && docker compose up
+#   # or: docker pull ghcr.io/sarjeet2013/harbor-ai-gateway:latest
+#
+# Ollama stays external on the host (or any reachable URL):
+#   Docker Desktop (macOS/Windows): http://host.docker.internal:11434
+#   Linux: extra_hosts host-gateway below makes that hostname resolve to the host
+# First run seeds config/gateway.yaml from gateway.docker.yaml.example when missing.
+#
+# Optional: mount a host .env by creating .env beside this file (env_file below).
 services:
-  edge:
+  harbor:
     build: .
+    image: ghcr.io/sarjeet2013/harbor-ai-gateway:latest
     ports:
       - "4000:4000"
     volumes:
-      - ./config:/app/config:ro
-      - ./logs:/app/logs
+      - ./config:/app/config
       - ./data:/app/data
-    environment:
-      GATEWAY_CONFIG: /app/config/gateway.yaml
-
-  litellm:
-    profiles: ["litellm"]
-    image: ghcr.io/berriai/litellm:main-latest
-    ports:
-      - "4001:4000"
-    volumes:
-      - ./config/litellm_config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
     env_file:
       - path: .env
         required: false
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-not-set}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-not-set}
-    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+      HARBOR_DOCKER: "1"
+      GATEWAY_CONFIG: /app/config/gateway.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

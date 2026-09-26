@@ -1,0 +1,129 @@
+# Docker-oriented config template — used when the edge runs *inside* a container
+# and Ollama runs on the host. Seeded automatically on first container start when
+# config/gateway.yaml is missing (see docker-entrypoint.sh / edge CLI).
+#
+# Host Ollama reachability:
+#   Docker Desktop (macOS/Windows): http://host.docker.internal:11434
+#   Linux: same hostname works when compose sets extra_hosts host-gateway
+#          (or point api_base at any reachable Ollama URL)
+#
+# For native (non-Docker) runs, prefer gateway.yaml.example (127.0.0.1).
+# Do NOT bake secrets here — use bind-mounted .env / environment.
+#
+# Hybrid default: cheap = host Ollama (qwen3:8b), expensive = OpenAI.
+# Path: edge :4000 → LiteLLM :4001 (in-container) → host Ollama :11434.
+
+listen: "0.0.0.0:4000"
+litellm_host: "127.0.0.1"
+litellm_port: 4001          # managed internal; `python -m edge start` launches it
+upstream_mode: litellm       # mock | litellm
+
+daily_budget_usd: 10.0
+on_budget_exceeded: force_cheap  # force_cheap | reject
+budget_state_path: "data/budget.json"
+
+ledger_path: "logs/ledger.jsonl"
+
+# Rough USD estimates for budget accounting (Ollama cheap is free; OpenAI expensive is paid)
+cost_estimates_usd:
+  cheap_per_request: 0.0
+  expensive_per_request: 0.02
+
+models:
+  cheap:
+    - name: ollama-cheap
+      # Local Ollama (qwen3:8b). Default chat alias — keep for Claude Code / Cursor.
+      litellm_model: ollama_chat/qwen3:8b
+      api_base: http://host.docker.internal:11434
+      # Disable qwen3 "thinking" so Claude Code does not get empty/slow replies
+      extra_litellm_params:
+        think: false
+    - name: ollama-chat
+      # Duplicate chat alias (same 8b); optional explicit name for clients
+      litellm_model: ollama_chat/qwen3:8b
+      api_base: http://host.docker.internal:11434
+      extra_litellm_params:
+        think: false
+    - name: ollama-coder
+      litellm_model: ollama_chat/qwen2.5-coder:14b
+      api_base: http://host.docker.internal:11434
+    - name: ollama-reason
+      # deepseek-r1:14b. Alt: qwen3:14b — avoid loading two 14Bs at once (VRAM).
+      litellm_model: ollama_chat/deepseek-r1:14b
+      api_base: http://host.docker.internal:11434
+  expensive:
+    # Hybrid: OpenAI. Default gpt-4o-mini (strong + cheaper than gpt-4o).
+    # To bump: litellm_model: openai/gpt-4o
+    # Requires: OPENAI_API_KEY in .env or the environment (LiteLLM reads os.environ/OPENAI_API_KEY)
+    - name: openai-expensive
+      litellm_model: openai/gpt-4o-mini
+      # no api_base — OpenAI cloud; api_key injected as os.environ/OPENAI_API_KEY by litellm_gen
+    # Optional Grok (xAI) instead — needs XAI_API_KEY (API access, not chat-only plans):
+    # - name: grok-expensive
+    #   litellm_model: xai/grok-3-mini
+    # Optional all-Ollama expensive (no cloud key) — comment out openai block above and uncomment:
+    # - name: ollama-expensive
+    #   litellm_model: ollama_chat/llama3.2:3b
+    #   api_base: http://host.docker.internal:11434
+
+router:
+  strategy: judge_then_heuristic   # LIVE default — judge primary; heuristic on fail/timeout/low conf
+  judge:
+    enabled: true
+    litellm_model: ollama_chat/qwen3:8b   # keep judge on a small/hot model
+    api_base: http://host.docker.internal:11434
+    timeout_ms: 1500
+    min_confidence: 0.55
+    on_failure: heuristic
+  # Prefer expensive if any of these match (case-insensitive) in the prompt text
+  expensive_keywords:
+    - "refactor"
+    - "architecture"
+    - "design a system"
+    - "complex"
+    - "analyze the entire"
+    - "write a detailed"
+  # Prefer expensive if estimated prompt chars exceed this
+  expensive_min_chars: 2000
+  # Keyword rails: fallback when judge fails / strategy heuristic_cost_first (client alias still wins)
+  default_cheap_model: ollama-cheap
+  coder_model: ollama-coder
+  reason_model: ollama-reason
+  coder_keywords:
+    - "write a function"
+    - "implement"
+    - "fix the bug"
+    - "fix a bug"
+    - "unit test"
+    - "code review"
+    - "compile error"
+    - "stack trace"
+    - "type error"
+    - "pull request"
+  reason_keywords:
+    - "step by step"
+    - "reason about"
+    - "prove that"
+    - "chain of thought"
+    - "logic puzzle"
+    - "math problem"
+    - "think through"
+    - "derive"
+
+# Response cache: exact + semantic (exact-first). See docs/features/cache.md
+cache:
+  enabled: true
+  mode: exact      # exact | semantic (semantic needs an embed model, e.g. nomic-embed-text)
+  ttl_seconds: 86400
+  max_entries: 1000
+  path: data/cache
+  embedding_model: nomic-embed-text
+  # embedding_api_base: http://host.docker.internal:11434  # default: cheap pool api_base
+  similarity_threshold: 0.92
+  # last_user helps agent loops (Claude Code): embed last user only (not full history/system).
+  # Exact hash remains full-request. Filter requires matching system_fingerprint + sampling/tools.
+  semantic_scope: last_user   # full | last_user
+
+# Mini Admin UI (http://127.0.0.1:<port>/admin). Mutations are localhost-only.
+# admin:
+#   open_browser: true   # also: python -m edge start --open-browser

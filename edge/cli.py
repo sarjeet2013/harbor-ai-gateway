@@ -408,13 +408,35 @@ def cmd_config_check(_args: argparse.Namespace | None = None) -> int:
 
 
 
-def _require_gateway_yaml() -> Path | None:
-    """Return path if missing local config (and no GATEWAY_CONFIG override)."""
+def _ensure_gateway_yaml() -> Path | None:
+    """Ensure local ``config/gateway.yaml`` exists (no-op if ``GATEWAY_CONFIG`` set).
+
+    On first run, copy ``config/gateway.yaml.example`` when present. Returns the
+    destination path if it was seeded, else ``None``. Exits with a clear error
+    when both the local config and the example template are missing.
+    """
     if os.environ.get("GATEWAY_CONFIG"):
         return None
     path = repo_root() / "config" / "gateway.yaml"
     if path.exists():
         return None
+    example = repo_root() / "config" / "gateway.yaml.example"
+    # Prefer Docker-oriented template when present and we look like a container
+    docker_example = repo_root() / "config" / "gateway.docker.yaml.example"
+    if (
+        Path("/.dockerenv").exists() or os.environ.get("HARBOR_DOCKER") == "1"
+    ) and docker_example.is_file():
+        example = docker_example
+    if not example.is_file():
+        print(
+            f"missing {path} and no template at {example}.\n"
+            "Create config/gateway.yaml (see README) or set GATEWAY_CONFIG.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(example.read_text())
+    print(f"seeded {path} from {example.name}")
     return path
 
 
@@ -434,15 +456,7 @@ def _maybe_open_admin(cfg: GatewayConfig, *, open_browser: bool) -> None:
 
 def cmd_start(args: argparse.Namespace) -> int:
     ensure_deps()
-    missing = _require_gateway_yaml()
-    if missing is not None:
-        example = repo_root() / "config" / "gateway.yaml.example"
-        print(
-            f"missing {missing}. Copy the template first:\n"
-            f"  cp {example} {missing}",
-            file=sys.stderr,
-        )
-        return 1
+    _ensure_gateway_yaml()
     loaded = _load_dotenv()
     ca = _ensure_ssl_ca_env()
     if ca:
@@ -537,35 +551,83 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     print("foreground — Ctrl+C to stop")
 
+    # Track live child pids (may be replaced by Admin Apply → edge restart --detach).
+    tracked = {
+        "edge": edge_proc.pid,
+        "litellm": litellm_proc.pid if litellm_proc else None,
+    }
+
     def _shutdown(signum: int, _frame: Any) -> None:
         print(f"\nreceived signal {signum}, shutting down…")
-        if edge_proc:
-            _kill_pid(edge_proc.pid)
-        if litellm_proc:
-            _kill_pid(litellm_proc.pid)
+        info = _read_pidfile() or {}
+        pids = {
+            int(info.get("edge_pid") or tracked["edge"] or 0),
+            int(info.get("litellm_pid") or (tracked["litellm"] or 0) or 0),
+            int(edge_proc.pid if edge_proc else 0),
+            int(litellm_proc.pid if litellm_proc else 0),
+        }
+        for pid in pids:
+            if pid:
+                _kill_pid(pid)
         PID_PATH.unlink(missing_ok=True)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # Wait on edge; if it dies, tear down litellm too
+    # Wait on edge; reattach if Admin (or restart CLI) respawns children under a
+    # new pidfile — needed so Docker PID 1 does not exit on Apply auto-restart.
     while True:
-        code = edge_proc.poll()
-        if code is not None:
-            print(f"edge exited (code={code})")
-            if litellm_proc:
-                _kill_pid(litellm_proc.pid)
+        info = _read_pidfile() or {}
+        ep = int(info.get("edge_pid") or tracked["edge"] or 0)
+        lp = int(info.get("litellm_pid") or (tracked["litellm"] or 0) or 0)
+        if ep:
+            tracked["edge"] = ep
+        if lp:
+            tracked["litellm"] = lp
+
+        edge_alive = bool(ep and _pid_alive(ep))
+        if not edge_alive:
+            # Brief grace for restart helper to write a new pidfile + spawn
+            time.sleep(1.0)
+            info2 = _read_pidfile() or {}
+            ep2 = int(info2.get("edge_pid") or 0)
+            if ep2 and _pid_alive(ep2):
+                tracked["edge"] = ep2
+                lp2 = int(info2.get("litellm_pid") or 0)
+                if lp2:
+                    tracked["litellm"] = lp2
+                print(f"reattached after restart (edge_pid={ep2})")
+                continue
+            print("edge exited")
+            if tracked["litellm"]:
+                _kill_pid(int(tracked["litellm"]))
             PID_PATH.unlink(missing_ok=True)
-            return code or 0
-        if litellm_proc and litellm_proc.poll() is not None:
-            print(
-                f"LiteLLM exited (code={litellm_proc.returncode}); stopping edge",
-                file=sys.stderr,
-            )
-            _kill_pid(edge_proc.pid)
-            PID_PATH.unlink(missing_ok=True)
-            return litellm_proc.returncode or 1
+            # Prefer original Popen exit code when available
+            code = edge_proc.poll()
+            return code if code is not None else 0
+
+        if cfg.upstream_mode == "litellm" and tracked["litellm"]:
+            lp = int(tracked["litellm"])
+            if not _pid_alive(lp):
+                time.sleep(1.0)
+                info2 = _read_pidfile() or {}
+                lp2 = int(info2.get("litellm_pid") or 0)
+                if lp2 and _pid_alive(lp2):
+                    tracked["litellm"] = lp2
+                    ep2 = int(info2.get("edge_pid") or 0)
+                    if ep2:
+                        tracked["edge"] = ep2
+                    print(f"reattached LiteLLM after restart (litellm_pid={lp2})")
+                    continue
+                print(
+                    f"LiteLLM exited; stopping edge",
+                    file=sys.stderr,
+                )
+                _kill_pid(int(tracked["edge"] or 0))
+                PID_PATH.unlink(missing_ok=True)
+                code = litellm_proc.returncode if litellm_proc else 1
+                return code if code is not None else 1
         time.sleep(0.5)
 
 

@@ -75,7 +75,7 @@ Same path for all clients once traffic hits the edge: clients → edge `:4000` �
 
 ## Planned (not yet shipped)
 
-- **Packaging / distribution** — Docker/GHCR, pipx, native release binaries; see [features/packaging.md](features/packaging.md). **Admin UI prioritized; packaging revisited later.**
+- **Packaging / distribution** — **Docker / GHCR shipped** (Phase 1); pipx + native binaries still planned — see [features/packaging.md](features/packaging.md).
 
 - **Streaming** — chat + Anthropic messages + OpenAI Responses SSE (incl. cache hit replay / miss tee-store). Messages and Responses miss paths collect-then-remap from chat SSE. See [features/streaming.md](features/streaming.md).
 

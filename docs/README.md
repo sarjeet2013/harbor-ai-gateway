@@ -10,6 +10,6 @@
 | [features/streaming.md](features/streaming.md) | Chat + Anthropic SSE (**shipped**); Responses stream planned |
 | [features/cursor.md](features/cursor.md) | Cursor attach via HTTPS tunnel (**shipped**) |
 | [features/admin-ui.md](features/admin-ui.md) | Mini Admin UI at `/admin` (**shipped**) |
-| [features/packaging.md](features/packaging.md) | Distribution plan: Docker, pip/pipx, native binaries (**planned**; Admin UI prioritized first) |
+| [features/packaging.md](features/packaging.md) | Distribution: Docker/GHCR (**Phase 1 shipped**); pipx + native planned |
 
 Top-level: [../README.md](../README.md), [../RUN_OLLAMA.md](../RUN_OLLAMA.md).

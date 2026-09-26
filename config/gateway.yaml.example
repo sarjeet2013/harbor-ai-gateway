@@ -1,5 +1,7 @@
 # Canonical config template — copy to gateway.yaml and edit:
 #   cp config/gateway.yaml.example config/gateway.yaml
+# Docker (Ollama on host): use config/gateway.docker.yaml.example instead
+#   (host.docker.internal:11434). `docker compose up` seeds that on first run.
 # gateway.yaml is gitignored (local override). Do NOT hand-edit litellm_config.yaml.
 # CLI writes config/.generated_litellm.yaml from `models:` (override with GATEWAY_LITELLM_CONFIG).
 #

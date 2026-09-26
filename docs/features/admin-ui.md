@@ -1,6 +1,6 @@
 # Feature: Mini Admin UI
 
-**Status:** **Shipped** (v1 mini). Packaging / distribution remains planned — see [packaging.md](packaging.md) (Admin UI prioritized; packaging revisited later).
+**Status:** **Shipped** (v1 mini). Docker packaging is Phase 1 shipped — see [packaging.md](packaging.md).
 
 When the edge is running, open a browser to configure models, caching, routing, frontier API keys, and Ollama `api_base` (any reachable host) without hand-editing YAML for common changes.
 
@@ -52,6 +52,8 @@ YAML remains the source of truth. Secrets **never** go into YAML or git.
 - Binding the edge to `0.0.0.0` still allows LAN clients to *view* `/admin` HTML/GET JSON; they cannot Apply. Prefer `listen: "127.0.0.1:4000"` if you want the UI unreachable from the LAN.
 - No password / remote-admin auth in v1 (out of scope).
 
+When Harbor runs in Docker with `-p 4000:4000`, open the UI at `http://127.0.0.1:4000/admin` on the **host**. The browser connects to the published port on loopback, so Apply mutations still pass the localhost guard. Prefer not to publish `:4000` on a non-loopback interface if you want the UI unreachable from the LAN.
+
 See also [SECURITY.md](../SECURITY.md).
 
 ## Restart behavior
@@ -87,5 +89,5 @@ Harbor does **not** hot-reload router/cache/LiteLLM in-process (prefer a supervi
 
 - First-run wizard polish
 - Auth passwords for remote admin
-- Packaging / GHCR / PyInstaller (parked; see [packaging.md](packaging.md))
+- pipx / PyInstaller native binaries (still planned; Docker/GHCR is shipped — see [packaging.md](packaging.md))
 - Rewriting router/cache logic
