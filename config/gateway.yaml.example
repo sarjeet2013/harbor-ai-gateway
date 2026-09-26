@@ -66,7 +66,7 @@ router:
     enabled: true
     litellm_model: ollama_chat/qwen3:8b   # never a 14B for classification
     api_base: http://192.168.4.31:11434
-    timeout_ms: 400
+    timeout_ms: 1500
     min_confidence: 0.55
     on_failure: heuristic
   # Prefer expensive if any of these match (case-insensitive) in the prompt text
