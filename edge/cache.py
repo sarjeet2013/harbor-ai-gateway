@@ -158,40 +158,28 @@ def _last_user_from_input(inp: Any) -> str:
     return _content_to_text(inp)
 
 
-def _truncate_embed_text(system_text: str, user_text: str, *, max_chars: int = _MAX_EMBED_CHARS) -> str:
-    """Prefer keeping the full last user message; truncate system to fit embed context."""
-    user_part = f"user: {user_text}" if user_text.strip() else ""
-    sys_part = f"system: {system_text}" if system_text.strip() else ""
-    if not sys_part:
-        return user_part[:max_chars]
-    if not user_part:
-        return sys_part[:max_chars]
-    # Reserve space for user (never truncate user below its full length unless user alone exceeds cap).
-    if len(user_part) >= max_chars:
-        return user_part[:max_chars]
-    budget = max_chars - len(user_part) - 1  # newline
-    if len(sys_part) > budget:
-        sys_part = sys_part[: max(0, budget)]
-    if sys_part:
-        return f"{sys_part}\n{user_part}"
-    return user_part
-
-
 def cacheable_text(body: dict[str, Any], *, scope: str = "full") -> str:
     """Textual parts for embedding — messages/system/input, not full tool JSON.
 
     scope:
       - ``full``: system + all message/input turns (legacy).
-      - ``last_user``: system (+ truncated) + last user turn only — so multi-turn
-        agent loops (Claude Code) can still semantic-match paraphrases of the
-        *current* prompt. Exact hash stays full-request either way.
+      - ``last_user``: last user turn only — multi-turn agent loops (Claude Code)
+        can semantic-match paraphrases of the *current* prompt. System identity
+        is enforced via ``system_fingerprint`` on the index, not the embed text
+        (huge system prompts overflow or dominate nomic). Exact hash stays
+        full-request either way.
     """
     if scope == "last_user":
-        system_text = _system_to_text(body.get("system"))
+        # Embed last user only. Agent system prompts (Claude Code) are huge and
+        # would either overflow nomic context or dominate cosine similarity.
+        # Same-system matching is enforced via system_fingerprint on the index.
         user_text = _last_user_from_messages(body.get("messages"))
         if not user_text.strip():
             user_text = _last_user_from_input(body.get("input"))
-        return _truncate_embed_text(system_text, user_text)
+        if not user_text.strip():
+            return ""
+        # Soft cap in case a single user turn is enormous.
+        return f"user: {user_text}"[:_MAX_EMBED_CHARS]
 
     chunks: list[str] = []
     system_text = _system_to_text(body.get("system"))

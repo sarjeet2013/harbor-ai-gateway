@@ -48,7 +48,7 @@ No embedding calls. Module: `edge/cache.py`. Integrated in `edge/main.py` **afte
 | Value | Embed text | Why |
 | --- | --- | --- |
 | `full` (default in code) | system + **all** message/input turns | Legacy; multi-turn agent sessions almost never semantic-hit because history growth moves the vector. Huge Claude Code system prompts often **fail embed** (`input length exceeds context`). |
-| `last_user` (live `gateway.yaml`) | system (truncated to fit ~6k chars) + **last user** turn only | Exact hash still covers the full request (rare hit in agent loops). Semantic can match paraphrases of the *same turn shape* across a session. Also stores/filters `system_fingerprint` so different system prompts do not cross-hit. |
+| `last_user` (live `gateway.yaml`) | **last user** turn only | Exact hash still covers the full request (rare hit in agent loops). Semantic can match paraphrases of the *same turn shape* across a session. System is matched by `system_fingerprint` (not embedded) — agent system prompts overflow/dominate nomic context. Sampling/tools still must match. |
 
 Tradeoff: `last_user` may return a prior turn’s answer when the latest user text is similar but earlier context differs. Prefer that over never hitting for Claude Code.
 

@@ -195,7 +195,7 @@ def test_cacheable_text_last_user_strips_prior_turns():
     assert "turn one" in full and "reply one" in full
     assert "turn one" not in last and "reply one" not in last
     assert "turn two paraphrase" in last
-    assert "sys" in last
+    assert "sys" not in last  # system via fingerprint, not embed text
     # Exact keys still differ when history grows
     from edge.cache import cache_key_hash, normalize_for_hash
 
@@ -397,8 +397,8 @@ def test_semantic_last_user_hits_across_growing_history(tmp_path: Path):
     """Claude Code shape: same system/tools, growing messages — last_user can semantic-hit."""
     shared = [0.8, 0.2, 0.1]
     # Embed text under last_user scope
-    embed1 = "system: agent-sys\nuser: explain caching"
-    embed2 = "system: agent-sys\nuser: explain caching please"  # paraphrase, history grown
+    embed1 = "user: explain caching"
+    embed2 = "user: explain caching please"  # paraphrase, history grown
     transport = _FakeEmbedTransport({embed1: shared, embed2: shared})
     client = httpx.Client(transport=transport)
     cache = ResponseCache(
@@ -446,8 +446,7 @@ def test_semantic_last_user_rejects_different_system(tmp_path: Path):
     shared = [1.0, 0.0, 0.0]
     transport = _FakeEmbedTransport(
         {
-            "system: sys-a\nuser: same question": shared,
-            "system: sys-b\nuser: same question": shared,
+            "user: same question": shared,
         }
     )
     client = httpx.Client(transport=transport)
