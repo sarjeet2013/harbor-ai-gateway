@@ -2,7 +2,7 @@
 
 **Status:** **Shipped (local + tunnel).** Cursor’s Override OpenAI Base URL traffic usually comes from **Cursor’s cloud**, so `http://127.0.0.1:4000` is unreachable without a **public HTTPS tunnel** to Harbor’s edge.
 
-Harbor serves Cursor on `/cursor/*` through the same `_handle` path as `/v1/chat/completions` (budget, heuristic router, exact cache, ledger). It also lists pool aliases on `GET /v1/models` and `GET /cursor/models`.
+Harbor serves Cursor on `/cursor/*` through the same `_handle` path as `/v1/chat/completions` (budget, router, cache, ledger). It also lists pool aliases on `GET /v1/models` and `GET /cursor/models`.
 
 ## Cursor settings
 
@@ -37,7 +37,7 @@ Streaming: send `"stream": true` on chat; Harbor passthrough SSE is shipped — 
 
 ## Ops notes
 
-- Prefer `--protocol http2` on macOS if QUIC quick tunnels return Cloudflare **530**.
+- Optional: if a QUIC quick tunnel returns Cloudflare **530**, retry with `--protocol http2`.
 - Keep Harbor and `cloudflared` running while Cursor is attached.
 - Restarting the quick tunnel → new host → update Override Base URL.
 - For a stable hostname, use a named Cloudflare tunnel (account required) instead of trycloudflare.

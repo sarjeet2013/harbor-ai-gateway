@@ -1,16 +1,30 @@
 # Harbor AI Gateway
 
-**Harbor** (short for **Harbor AI Gateway**) is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic model router**, **exact + semantic response cache** (tokens saved), and a **ledger** on every request.
+**Harbor** is a personal local AI gateway that wraps [LiteLLM](https://docs.litellm.ai/) with a thin edge you own: **day budget**, **heuristic + LLM-judge routing**, **exact + semantic response cache** (tokens saved), and a **ledger** on every request.
 
 Goal: usable on one machine, something to build on — not an enterprise control plane.
 
-**Hybrid pools (default):** cheap = local **Ollama**, expensive = **OpenAI** (`openai/gpt-4o-mini`). Everyday Ollama works without an OpenAI key; set `OPENAI_API_KEY` for expensive/heuristic. See **[docs/features/hybrid.md](docs/features/hybrid.md)** and **[RUN_OLLAMA.md](RUN_OLLAMA.md)**.
+Works anywhere you have **Python 3**, optional **Ollama** (local or remote), and optional cloud keys. Default hybrid pools: **cheap = Ollama**, **expensive = OpenAI** (`openai/gpt-4o-mini`). Everyday Ollama needs no cloud key; set `OPENAI_API_KEY` for expensive/heuristic traffic.
+
+**License:** [MIT](LICENSE) · **Docs:** [docs/](docs/README.md) · **Security:** [docs/SECURITY.md](docs/SECURITY.md)
+
+## Features (shipped)
+
+| Feature | Status | Docs |
+| --- | --- | --- |
+| Exact + semantic response cache (incl. stream hit/miss) | **Shipped** | [docs/features/cache.md](docs/features/cache.md) |
+| Heuristic + LLM judge routing (`judge_then_heuristic`) | **Shipped** | [docs/features/routing.md](docs/features/routing.md) |
+| Hybrid pools (Ollama cheap + OpenAI expensive) | **Shipped** | [docs/features/hybrid.md](docs/features/hybrid.md) |
+| Streaming SSE (chat + Anthropic messages) | **Shipped** | [docs/features/streaming.md](docs/features/streaming.md) |
+| Cursor attach (`/cursor` + HTTPS tunnel) | **Shipped** | [docs/features/cursor.md](docs/features/cursor.md) |
+| Claude Code / Codex surfaces (`/v1/messages`, `/v1/responses`) | **Shipped** | [architecture](docs/architecture.md) |
+| OpenAI `/v1/responses` streaming | Planned (501 today) | [streaming](docs/features/streaming.md) |
 
 ## What we own vs wrap
 
 | Layer | Owner |
 | --- | --- |
-| Day budget gate, heuristic router, response cache, ledger | **Us** (FastAPI edge `:4000`) |
+| Day budget gate, router, response cache, ledger | **Us** (FastAPI edge `:4000`) |
 | Provider adapters, keys, OpenAI-compatible proxy | **LiteLLM** (`:4001`, managed by CLI) |
 | Cursor / Claude Code / Codex | **Clients** (attach via `config/clients/`) |
 
@@ -27,7 +41,7 @@ flowchart LR
 
   subgraph edge [Our edge :4000]
     BUDGET[Day budget gate]
-    ROUTER[Heuristic router]
+    ROUTER[Judge / heuristic router]
     CACHE[Response cache]
     LEDGER[Ledger]
   end
@@ -45,85 +59,82 @@ flowchart LR
   CACHE -->|hit| LEDGER
 ```
 
-**Request path:** Client → edge `:4000` → budget → router → **cache** → ledger → (CLI-managed) LiteLLM `:4001` (or mock) → providers → client. Cache hits skip upstream.
+**Request path:** Client → edge `:4000` → budget → router → **cache** → ledger → (CLI-managed) LiteLLM `:4001` (or mock) → providers. Cache hits skip upstream.
 
-## Quick start (recommended CLI)
+## Quick start
 
-One config file (`config/gateway.yaml`) defines listen ports, budget, router, and model pools (including LiteLLM `litellm_model` + `api_base`). The CLI generates LiteLLM YAML and starts both processes.
-
-**Install once:**
+### 1. Install
 
 ```bash
+git clone https://github.com/sarjeet2013/harbor-ai-gateway.git
+cd harbor-ai-gateway
+
 python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+# Windows:
+#   .venv\Scripts\activate
 
-# Core edge deps (always)
-pip install -r requirements.txt
-
-# REQUIRED for default config (upstream_mode: litellm / Ollama).
-# Skip only if you run mock mode (GATEWAY_CONFIG=config/gateway.mock.yaml).
-pip install -r requirements-litellm.txt
-# equivalent: pip install 'litellm[proxy]>=1.72' async_generator
-# If Ollama *streaming* fails with async_generator / async_get_ollama_*:
-#   pip install -U -r requirements-litellm.txt
+pip install -r requirements.txt -r requirements-litellm.txt
 ```
 
-> **Default `config/gateway.yaml` is hybrid Ollama (cheap) + OpenAI (expensive) via LiteLLM.**
-> Without `requirements-litellm.txt`, `python -m edge start` / `doctor` fail *before* generating
-> config — no late surprise. Cheap/Ollama needs no cloud key; expensive needs `OPENAI_API_KEY`.
+> Skip `requirements-litellm.txt` only for mock mode (`GATEWAY_CONFIG=config/gateway.mock.yaml`).
 
-Verify deps anytime: `python -m edge doctor` (exits non-zero with an install hint if something is missing; also checks LiteLLM when `upstream_mode` is `litellm`; soft-probes configured Ollama hosts). List/set pools: `python -m edge models` / `models set` (see CLI reference). LiteLLM is launched as `python -m edge.litellm_cli` (same interpreter as the edge CLI) so a stale `.venv/bin/litellm` shebang cannot break `start` while `doctor` still passes.
+### 2. Config + secrets
 
 ```bash
-# Check aliases that will be sent to LiteLLM (catches missing litellm_model)
+cp config/gateway.yaml.example config/gateway.yaml
+cp .env.example .env
+# Edit .env — set OPENAI_API_KEY only if you want expensive/OpenAI calls.
+# Never commit .env or real keys. See docs/SECURITY.md.
+```
+
+`config/gateway.yaml` is **gitignored** (local override). The tracked template is `config/gateway.yaml.example` with `api_base: http://127.0.0.1:11434`. Point `api_base` at any reachable Ollama host if needed:
+
+```bash
+python -m edge models set --pool cheap --model qwen3:8b --api-base http://127.0.0.1:11434
+# or any host: --api-base http://<ollama-host>:11434
+```
+
+### 3. Ollama (cheap pool)
+
+Install and run [Ollama](https://ollama.com) on this machine (or another host), then pull models you configured:
+
+```bash
+ollama serve          # if not already running as a service
+ollama pull qwen3:8b  # default cheap / judge model
+# optional: ollama pull qwen2.5-coder:14b deepseek-r1:14b nomic-embed-text
+```
+
+Confirm reachability:
+
+```bash
+curl -s http://127.0.0.1:11434/api/tags | head
+```
+
+### 4. Start / stop
+
+```bash
+python -m edge doctor        # deps + soft-probe Ollama
 python -m edge config-check
-
-# Foreground (Ctrl+C stops edge + LiteLLM)
-python -m edge start
-
-# Or background
+python -m edge start         # foreground (Ctrl+C stops edge + LiteLLM)
+# or:
 python -m edge start --detach
 python -m edge status
 python -m edge cache-stats
 python -m edge stop
 ```
 
-When `upstream_mode: mock`, LiteLLM is **not** started.
-
-**Do not hand-edit `config/litellm_config.yaml`.** Change models only in `config/gateway.yaml`. The CLI writes `config/.generated_litellm.yaml` (gitignored). Override with `GATEWAY_LITELLM_CONFIG` if you must point elsewhere.
-
-## Quick start (Ollama on Mac — hybrid with optional OpenAI)
-
-See **[RUN_OLLAMA.md](RUN_OLLAMA.md)** and **[docs/features/hybrid.md](docs/features/hybrid.md)**. One-liner after venv activate:
+### 5. Smoke
 
 ```bash
-pip install -r requirements.txt -r requirements-litellm.txt
-```
-
-Then point cheap at Mini Ollama (`qwen3:8b` @ `http://192.168.4.31:11434` in `config/gateway.yaml`) and `python -m edge start`. Optional: `export OPENAI_API_KEY=...` for expensive OpenAI.
-
-## Quick start (mock mode — no API keys / no LiteLLM)
-
-Use the committed mock config (does **not** change the default Ollama `gateway.yaml`):
-
-```bash
+./scripts/smoke.sh
+# or mock (no Ollama / no cloud keys):
 GATEWAY_CONFIG=config/gateway.mock.yaml python -m edge start
-./scripts/smoke.sh
+GATEWAY_CONFIG=config/gateway.mock.yaml ./scripts/smoke.sh
 ```
 
-`./scripts/smoke.sh` also works against the **default hybrid** gateway (`python -m edge start` with `config/gateway.yaml`); it reads `/healthz` and picks `ollama-cheap` vs `mock-cheap` automatically. Without `OPENAI_API_KEY`, expensive completion is soft-SKIP'd; cheap + stream still must pass.
-
-Or set `upstream_mode: mock` and name-only models (`mock-cheap` / `mock-expensive`) in your own `gateway.yaml`.
-
-### Docker Compose (optional)
-
-```bash
-docker compose up --build -d          # edge only (mock mode)
-./scripts/smoke.sh
-
-# Optional LiteLLM sidecar (legacy hand config; prefer CLI on the host):
-# docker compose --profile litellm up --build -d
-```
+More Ollama detail: **[RUN_OLLAMA.md](RUN_OLLAMA.md)** · Hybrid notes: **[docs/features/hybrid.md](docs/features/hybrid.md)**.
 
 ## Endpoints (edge `:4000`)
 
@@ -134,116 +145,94 @@ docker compose up --build -d          # edge only (mock mode)
 | `POST` | `/v1/responses` | Codex (`wire_api = "responses"`); edge→chat when `litellm` |
 | `GET` | `/healthz` | ops |
 | `GET` | `/v1/budget` | day spend snapshot |
-| `*` | `/cursor/...` | Cursor attach (Harbor chat/models; needs HTTPS tunnel) — [docs/features/cursor.md](docs/features/cursor.md) |
+| `*` | `/cursor/...` | Cursor attach — [docs/features/cursor.md](docs/features/cursor.md) |
 
 ### curl examples
 
-**Default hybrid config** (`config/gateway.yaml`, `upstream_mode: litellm`, models `ollama-cheap` / `openai-expensive`).
-The edge exposes all three surfaces; `/v1/messages` and `/v1/responses` are translated to
-`/v1/chat/completions` before LiteLLM so Ollama always works. Expensive/OpenAI needs `OPENAI_API_KEY`.
-
 ```bash
-# OpenAI chat
 curl -s http://127.0.0.1:4000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"ollama-cheap","messages":[{"role":"user","content":"hi"}],"max_tokens":64}'
 
-# Anthropic messages (Claude Code) — max_tokens required
 curl -s http://127.0.0.1:4000/v1/messages \
   -H 'Content-Type: application/json' \
   -H 'x-api-key: sk-local-gateway' \
   -H 'anthropic-version: 2023-06-01' \
   -d '{"model":"ollama-cheap","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
 
-# OpenAI responses (Codex)
 curl -s http://127.0.0.1:4000/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{"model":"ollama-cheap","input":"hi"}'
 ```
 
-**Mock mode** (`GATEWAY_CONFIG=config/gateway.mock.yaml`):
-
-```bash
-curl -s http://127.0.0.1:4000/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"mock-cheap","messages":[{"role":"user","content":"hi"}]}'
-
-curl -s http://127.0.0.1:4000/v1/messages \
-  -H 'Content-Type: application/json' \
-  -H 'x-api-key: sk-local-gateway' \
-  -H 'anthropic-version: 2023-06-01' \
-  -d '{"model":"mock-cheap","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
-
-curl -s http://127.0.0.1:4000/v1/responses \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"mock-cheap","input":"hi"}'
-```
+Client attach snippets: `config/clients/` (Claude Code, Codex, Cursor). Local bearer `sk-local-gateway` is a **placeholder**, not a provider key — see [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Budget + router + ledger
 
-- **Day budget** (`daily_budget_usd`): tracked in memory and persisted to `data/budget.json`.
+- **Day budget** (`daily_budget_usd`): persisted to `data/budget.json`.
 - **`on_budget_exceeded`**: `force_cheap` (default) or `reject` (HTTP 429).
-- **Heuristic router**: cheap by default; expensive if prompt matches `router.expensive_keywords` or exceeds `expensive_min_chars`; within cheap, phase-1 task-class keywords pick `ollama-coder` / `ollama-reason` / `ollama-cheap` (see [docs/features/routing.md](docs/features/routing.md)). Client Harbor alias wins when `model` matches a configured name.
-- **Ledger**: JSONL at `logs/ledger.jsonl` — each line has `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`, plus `cache_hit` / `cache_kind` / `tokens_saved*`.
+- **Router**: live default `judge_then_heuristic` (local Ollama judge; keyword/length heuristic fallback). Client Harbor alias wins when `model` matches a configured name. See [routing.md](docs/features/routing.md).
+- **Ledger**: JSONL at `logs/ledger.jsonl` — `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`, plus `cache_hit` / `cache_kind` / `tokens_saved*`.
 
+## Cache
 
-## Cache (shipping: exact + semantic)
-
-Response cache on local disk (`data/cache/`) — **enabled by default** in `config/gateway.yaml` (`cache.enabled: true`, TTL 24h). Default live mode is **`exact`**; set `mode: semantic` after pulling `nomic-embed-text` (or similar) on Ollama. Semantic is **exact-first**, then cosine similarity on embeddings (threshold default `0.92`); embed failures soft-fail to miss. Hits skip upstream and do **not** charge the day budget; ledger records `cache_hit`, `cache_kind` (`exact` | `semantic` | `none`), and `tokens_saved*`.
+Disk cache under `data/cache/` — enabled by default. Template default is **`mode: exact`**. Set `mode: semantic` after `ollama pull nomic-embed-text` (exact-first, then cosine). Hits skip upstream and do not charge the day budget.
 
 ```bash
-python -m edge cache-stats   # hit rate + tokens_saved from ledger
+python -m edge cache-stats
 ```
 
-Intelligent (judge) routing is the **live default** (`judge_then_heuristic`); heuristic is fallback. Details: **[docs/features/routing.md](docs/features/routing.md)**.
+Details: [docs/features/cache.md](docs/features/cache.md). Streaming: [docs/features/streaming.md](docs/features/streaming.md).
 
-**Streaming (v1 chat):** `POST /v1/chat/completions` with `"stream": true` returns SSE (`text/event-stream`); cache is bypassed; ledger + budget update once after the stream completes. Messages/Responses streaming still planned (501 if `stream: true`). Details: **[docs/features/streaming.md](docs/features/streaming.md)**.
+## Config layout
 
-## Client attach
-
-Copy-paste snippets live under `config/clients/`:
-
-| Client | Notes |
+| Path | Role |
 | --- | --- |
-| curl / OpenAI SDK | `OPENAI_BASE_URL=http://127.0.0.1:4000/v1` |
-| Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:4000` — needs `/v1/messages` |
-| Codex | `openai_base_url` + optional `wire_api = "responses"` |
-| Cursor | Public HTTPS tunnel + Override Base URL `…/cursor` — [docs/features/cursor.md](docs/features/cursor.md) |
+| `config/gateway.yaml.example` | **Tracked** public template (localhost Ollama) |
+| `config/gateway.yaml` | **Local** override (gitignored) — `cp` from example |
+| `config/gateway.mock.yaml` | Mock upstream for demos / CI |
+| `config/.generated_litellm.yaml` | Auto-generated by CLI (gitignored) |
+| `config/litellm_config.yaml` | Deprecated stub — do not edit |
+| `.env.example` → `.env` | Provider keys (gitignored) |
 
-## Config
-
-- **`config/gateway.yaml`** — **canonical** default (hybrid Ollama cheap + OpenAI expensive + litellm). Override path with `GATEWAY_CONFIG`.
-- **`config/gateway.mock.yaml`** — mock upstream for demos (no LiteLLM/Ollama); smoke auto-detects mock vs Ollama
-- `config/.generated_litellm.yaml` — auto-generated by CLI (gitignored); override with `GATEWAY_LITELLM_CONFIG`
-- `config/litellm_config.yaml` — **deprecated** stub; do not edit
-- `config/gateway.yaml.example` — template
-
-Legacy: pools as bare string lists (`cheap: ["ollama-cheap"]`) still load for the router; prefer the unified object shape so generation stays in sync.
+Override path with `GATEWAY_CONFIG`. Legacy bare string pools still load; prefer the unified object shape.
 
 ## CLI reference
 
 | Command | Purpose |
 | --- | --- |
-| `python -m edge start` | Generate LiteLLM YAML; start LiteLLM (if litellm mode) + edge; foreground |
-| `python -m edge start --detach` (`-d`) | Same, background (pidfile in `data/gateway.pid`) |
-| `python -m edge stop` | Kill via pidfile / ports |
+| `python -m edge start` | Generate LiteLLM YAML; start LiteLLM (if litellm mode) + edge |
+| `python -m edge start --detach` (`-d`) | Background (`data/gateway.pid`) |
+| `python -m edge stop` | Stop via pidfile / ports |
 | `python -m edge status` | Ports, pids, upstream_mode, models |
-| `python -m edge config-check` | Print resolved aliases → `litellm_model` |
-| `python -m edge models` / `models list` | Show cheap/expensive: alias, `litellm_model`, `api_base`, enabled |
-| `python -m edge models set --pool …` | Edit primary pool entry (`--model`, `--api-base`, `--enable`/`--disable`); writes `gateway.yaml` |
-| `python -m edge cache-stats` | Cache hit rate + total tokens saved |
-| `python -m edge doctor` | Verify edge deps (+ LiteLLM when litellm mode); soft-probe Ollama `api_base` (`GET /api/tags`) |
+| `python -m edge config-check` | Resolved aliases → `litellm_model` |
+| `python -m edge models` / `models set` | List / edit cheap & expensive pools |
+| `python -m edge cache-stats` | Hit rate + tokens saved |
+| `python -m edge doctor` | Deps + soft-probe Ollama `api_base` |
 
-**Model pools (no admin UI):** `config/gateway.yaml` stays the source of truth. Use `python -m edge models set` for low-thrash edits of model id + `api_base` on **cheap** / **expensive** only. `models set` round-trips with PyYAML (inline comments are not preserved — see `config/gateway.yaml.example`). Restart after set: `python -m edge stop && python -m edge start`.
+Restart after `models set`: `python -m edge stop && python -m edge start`.
 
 Logs: `logs/edge.log`, `logs/litellm.log`.
 
-## v0 scope
+## Development
 
-**In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact + semantic response cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode for demos.
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt -r requirements-litellm.txt
+cp config/gateway.yaml.example config/gateway.yaml
+pytest
+python -m edge doctor
+```
 
-**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **In:** chat SSE passthrough; intelligent/judge routing (live default). **Planned later:** Responses SSE (where still 501).
+Docker (optional mock edge):
 
-## Status
+```bash
+docker compose up --build -d
+./scripts/smoke.sh
+```
 
-v0 runnable: FastAPI edge + managed LiteLLM via `python -m edge` + smoke (hybrid Ollama/OpenAI or mock).
+## Scope
+
+**In:** wrap LiteLLM; judge + heuristic routing; day USD budget; exact + semantic cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode; chat + Anthropic SSE.
+
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned:** OpenAI Responses SSE (still 501).

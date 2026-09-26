@@ -1,6 +1,6 @@
 # Response cache
 
-**Status:** **Exact + semantic cache shipping**. Exact is the default in live `gateway.yaml`; set `mode: semantic` after pulling an embedding model on Ollama (e.g. Mini). Intelligent (judge) routing is **shipped** as live default (see [routing.md](routing.md)); judge runs before cache.
+**Status:** **Exact + semantic cache shipping**. Template default is `mode: exact`; set `mode: semantic` after pulling an embedding model on Ollama (e.g. `nomic-embed-text`). Intelligent (judge) routing is **shipped** as live default (see [routing.md](routing.md)); judge runs before cache.
 
 Harbor’s differentiation vs smart-routing-only gateways: prove value with **tokens saved** via response caching at the edge.
 
@@ -41,7 +41,7 @@ No embedding calls. Module: `edge/cache.py`. Integrated in `edge/main.py` **afte
 4. On miss: upstream as today; on success store the exact entry **plus** embedding vector (when embed succeeds).
 5. If the embedding provider fails (Ollama down, model missing): **soft-fail** to miss (still store exact without embedding on set; warn once). Never 500 the request because cache embed failed.
 
-**Embedding backend (MVP):** Ollama HTTP via `httpx` — `POST {embedding_api_base}/api/embeddings` with `{"model", "prompt"}` (falls back to `/api/embed` if 404). Default `embedding_api_base` is the cheap pool’s `api_base` (Mini), else `http://127.0.0.1:11434`.
+**Embedding backend (MVP):** Ollama HTTP via `httpx` — `POST {embedding_api_base}/api/embeddings` with `{"model", "prompt"}` (falls back to `/api/embed` if 404). Default `embedding_api_base` is the cheap pool’s `api_base`, else `http://127.0.0.1:11434`.
 
 **Semantic scope (`semantic_scope`):**
 
@@ -125,18 +125,18 @@ cache:
   max_entries: 1000
   path: data/cache
   embedding_model: nomic-embed-text
-  # embedding_api_base: http://192.168.4.31:11434  # default: cheap pool api_base
+  # embedding_api_base: http://127.0.0.1:11434  # default: cheap pool api_base
   similarity_threshold: 0.92
   semantic_scope: last_user   # full | last_user (last_user for Claude Code multi-turn)
 ```
 
-Live default stays **`mode: exact`** until the embed model is verified on Mini. `config/gateway.yaml.example` documents **`mode: semantic`**.
+Template default is **`mode: exact`**. Switch to `semantic` after the embed model is available on your Ollama host.
 
-### Enable semantic (live)
+### Enable semantic
 
 ```bash
-# On Mini (or via Air → Mini):
-curl http://192.168.4.31:11434/api/pull -d '{"name":"nomic-embed-text"}'
+ollama pull nomic-embed-text
+# or: curl http://127.0.0.1:11434/api/pull -d '{"name":"nomic-embed-text"}'
 # Then in gateway.yaml: mode: semantic  (embedding_model already set)
 python -m edge stop && python -m edge start -d
 ```
@@ -158,7 +158,7 @@ python -m edge stop && python -m edge start -d
 - Streaming: `"stream": true` exact/semantic hit returns SSE; miss stores entry usable by later stream or non-stream; bypass headers still skip; incomplete streams do not store.
 
 ```bash
-# Mac / local
+# Local
 GATEWAY_CONFIG=config/gateway.mock.yaml python -m edge start -d
 curl -s http://127.0.0.1:4000/v1/chat/completions \
   -H 'Content-Type: application/json' \

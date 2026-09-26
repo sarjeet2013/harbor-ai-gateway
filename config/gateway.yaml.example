@@ -1,9 +1,12 @@
-# Canonical config template — copy to gateway.yaml and edit.
-# Do NOT hand-edit litellm_config.yaml (deprecated).
+# Canonical config template — copy to gateway.yaml and edit:
+#   cp config/gateway.yaml.example config/gateway.yaml
+# gateway.yaml is gitignored (local override). Do NOT hand-edit litellm_config.yaml.
 # CLI writes config/.generated_litellm.yaml from `models:` (override with GATEWAY_LITELLM_CONFIG).
-# Hybrid default: cheap = Mini LAN Ollama (qwen3:8b), expensive = OpenAI.
-# Everyday Ollama works without OPENAI_API_KEY; export OPENAI_API_KEY for expensive/heuristic.
-# Ollama e2e: edge :4000 → LiteLLM :4001 → Mini Ollama :11434 (+ OpenAI cloud for expensive)
+#
+# Hybrid default: cheap = local Ollama (qwen3:8b), expensive = OpenAI.
+# Everyday Ollama works without OPENAI_API_KEY; set OPENAI_API_KEY for expensive/heuristic.
+# Path: edge :4000 → LiteLLM :4001 → Ollama :11434 (+ OpenAI cloud for expensive).
+# Point api_base at any reachable Ollama URL (same machine or remote).
 listen: "0.0.0.0:4000"
 litellm_host: "127.0.0.1"
 litellm_port: 4001          # managed internal; `python -m edge start` launches it
@@ -23,36 +26,33 @@ cost_estimates_usd:
 models:
   cheap:
     - name: ollama-cheap
-      # Mac Mini Ollama on LAN (qwen3:8b). Default chat alias — keep for Claude Code / Cursor.
+      # Local Ollama (qwen3:8b). Default chat alias — keep for Claude Code / Cursor.
       litellm_model: ollama_chat/qwen3:8b
-      api_base: http://192.168.4.31:11434
+      api_base: http://127.0.0.1:11434
       # Disable qwen3 "thinking" so Claude Code does not get empty/slow replies
       extra_litellm_params:
         think: false
     - name: ollama-chat
       # Duplicate chat alias (same 8b); optional explicit name for clients
       litellm_model: ollama_chat/qwen3:8b
-      api_base: http://192.168.4.31:11434
+      api_base: http://127.0.0.1:11434
       extra_litellm_params:
         think: false
     - name: ollama-coder
       litellm_model: ollama_chat/qwen2.5-coder:14b
-      api_base: http://192.168.4.31:11434
+      api_base: http://127.0.0.1:11434
     - name: ollama-reason
-      # deepseek-r1:14b. Alt: qwen3:14b — do not load two 14Bs at once (VRAM).
+      # deepseek-r1:14b. Alt: qwen3:14b — avoid loading two 14Bs at once (VRAM).
       litellm_model: ollama_chat/deepseek-r1:14b
-      api_base: http://192.168.4.31:11434
+      api_base: http://127.0.0.1:11434
   expensive:
     # Hybrid: OpenAI. Default gpt-4o-mini (strong + cheaper than gpt-4o).
     # To bump: litellm_model: openai/gpt-4o
-    # Requires: export OPENAI_API_KEY=...  (LiteLLM reads os.environ/OPENAI_API_KEY)
+    # Requires: OPENAI_API_KEY in .env or the environment (LiteLLM reads os.environ/OPENAI_API_KEY)
     - name: openai-expensive
       litellm_model: openai/gpt-4o-mini
       # no api_base — OpenAI cloud; api_key injected as os.environ/OPENAI_API_KEY by litellm_gen
-      # optional explicit override:
-      # extra_litellm_params:
-      #   api_key: os.environ/OPENAI_API_KEY
-    # Optional Grok (xAI) instead — needs XAI_API_KEY (API access, not SuperGrok alone):
+    # Optional Grok (xAI) instead — needs XAI_API_KEY (API access, not chat-only plans):
     # - name: grok-expensive
     #   litellm_model: xai/grok-3-mini
     # Optional all-Ollama expensive (no cloud key) — comment out openai block above and uncomment:
@@ -64,8 +64,8 @@ router:
   strategy: judge_then_heuristic   # LIVE default — judge primary; heuristic on fail/timeout/low conf
   judge:
     enabled: true
-    litellm_model: ollama_chat/qwen3:8b   # never a 14B for classification
-    api_base: http://192.168.4.31:11434
+    litellm_model: ollama_chat/qwen3:8b   # keep judge on a small/hot model
+    api_base: http://127.0.0.1:11434
     timeout_ms: 1500
     min_confidence: 0.55
     on_failure: heuristic
@@ -107,12 +107,12 @@ router:
 # Response cache: exact + semantic (exact-first). See docs/features/cache.md
 cache:
   enabled: true
-  mode: semantic   # exact | semantic (semantic = exact-first, then cosine)
+  mode: exact      # exact | semantic (semantic needs an embed model, e.g. nomic-embed-text)
   ttl_seconds: 86400
   max_entries: 1000
   path: data/cache
   embedding_model: nomic-embed-text
-  # embedding_api_base: http://192.168.4.31:11434  # default: cheap pool api_base
+  # embedding_api_base: http://127.0.0.1:11434  # default: cheap pool api_base
   similarity_threshold: 0.92
   # last_user helps agent loops (Claude Code): embed last user only (not full history/system).
   # Exact hash remains full-request. Filter requires matching system_fingerprint + sampling/tools.

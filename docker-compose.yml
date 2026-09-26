@@ -1,5 +1,6 @@
 # Default: edge in mock mode (no API keys).
-# Prefer host CLI for Ollama bundling: python -m edge start
+# Prefer host CLI: python -m edge start
+# First-time: cp config/gateway.yaml.example config/gateway.yaml
 # Full stack (legacy): docker compose --profile litellm up --build
 # litellm_config.yaml is deprecated — for Docker litellm profile, either
 # copy config/.generated_litellm.yaml over it after a CLI generate, or use the host CLI.

@@ -17,31 +17,29 @@ Unknown client model ids (e.g. Claude Code’s stock model name) do **not** pin 
 
 Source: `edge/judge.py`, `edge/router.py`; config in `config/gateway.yaml` → `router:`.
 
-## Judge config (live)
+## Judge config (template)
 
 ```yaml
 router:
   strategy: judge_then_heuristic
   judge:
     enabled: true
-    litellm_model: ollama_chat/qwen3:8b   # never a 14B for classification
-    api_base: http://192.168.4.31:11434
-    timeout_ms: 400
+    litellm_model: ollama_chat/qwen3:8b   # keep judge on a small/hot model
+    api_base: http://127.0.0.1:11434
+    timeout_ms: 1500
     min_confidence: 0.55
     on_failure: heuristic
 ```
 
-`strategy: heuristic_cost_first` remains supported (mock / tests). Live `gateway.yaml` ships `judge_then_heuristic`.
+`strategy: heuristic_cost_first` remains supported (mock / tests). Template ships `judge_then_heuristic`.
 
 ## Judge vs cache
 
-Order stays **budget → router → cache**. The judge runs in the router **before** cache (same as the old heuristic) so the chosen model identity stays consistent with the cache key. Prefer a fast judge (`timeout_ms` &lt; 500). Cache hits still skip upstream, but route was already chosen.
+Order stays **budget → router → cache**. The judge runs in the router **before** cache so the chosen model identity stays consistent with the cache key. Prefer a fast judge. Cache hits still skip upstream, but route was already chosen.
 
 Ledger optional extras when the judge ran: `judge_ms`, `judge_label`, `judge_confidence`.
 
 ## Heuristic rails (fallback)
-
-Same keyword lists as phase-1:
 
 | Match | Pool / alias | Reason |
 | --- | --- | --- |
@@ -54,21 +52,21 @@ Same keyword lists as phase-1:
 
 | Alias | LiteLLM model | Role |
 | --- | --- | --- |
-| `ollama-cheap` | `ollama_chat/qwen3:8b` + Mini `api_base` | Default chat / judge `chat` |
+| `ollama-cheap` | `ollama_chat/qwen3:8b` + `api_base` | Default chat / judge `chat` |
 | `ollama-chat` | same 8b | Optional duplicate chat name |
 | `ollama-coder` | `ollama_chat/qwen2.5-coder:14b` | Judge `coder` |
 | `ollama-reason` | `ollama_chat/deepseek-r1:14b` | Judge `reason` |
 
 ## VRAM / latency notes
 
-- Judge must stay on the **hot 8b** (`qwen3:8b`), never a 14B classifier.
-- Mini typically should **not** keep two 14Bs resident; Ollama swaps coder ↔ reason.
-- If Mini judge TTFB exceeds `timeout_ms`, expect `judge_fallback:heuristic:…` in the ledger (still correct routing via keywords). Raise `timeout_ms` only if you accept added edge latency.
+- Judge should stay on a **small/hot** model (`qwen3:8b`), not a large classifier.
+- Avoid keeping two 14Bs resident on one GPU host; Ollama will swap coder ↔ reason.
+- If judge TTFB exceeds `timeout_ms`, expect `judge_fallback:heuristic:…` in the ledger (still correct routing via keywords). Raise `timeout_ms` only if you accept added edge latency.
 
-## Kill / rollback criteria (brief)
+## Rollback
 
-- Sustained judge timeouts dominating ledger, *and* heuristic quality acceptable → set `strategy: heuristic_cost_first` or `judge.enabled: false`, restart.
-- Wrong-pool spikes after ship → tighten labels via prompt/examples or temporarily raise `min_confidence`.
+- Sustained judge timeouts dominating ledger, and heuristic quality acceptable → set `strategy: heuristic_cost_first` or `judge.enabled: false`, restart.
+- Wrong-pool spikes → tighten labels via prompt/examples or temporarily raise `min_confidence`.
 
 ## Claude Code / Cursor
 

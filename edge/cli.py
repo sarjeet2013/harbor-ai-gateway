@@ -406,8 +406,28 @@ def cmd_config_check(_args: argparse.Namespace | None = None) -> int:
     return 0 if ok else 1
 
 
+
+def _require_gateway_yaml() -> Path | None:
+    """Return path if missing local config (and no GATEWAY_CONFIG override)."""
+    if os.environ.get("GATEWAY_CONFIG"):
+        return None
+    path = repo_root() / "config" / "gateway.yaml"
+    if path.exists():
+        return None
+    return path
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     ensure_deps()
+    missing = _require_gateway_yaml()
+    if missing is not None:
+        example = repo_root() / "config" / "gateway.yaml.example"
+        print(
+            f"missing {missing}. Copy the template first:\n"
+            f"  cp {example} {missing}",
+            file=sys.stderr,
+        )
+        return 1
     loaded = _load_dotenv()
     ca = _ensure_ssl_ca_env()
     if ca:
@@ -827,7 +847,7 @@ def build_parser() -> argparse.ArgumentParser:
     models_set_p.add_argument(
         "--api-base",
         dest="api_base",
-        help="provider base URL (e.g. http://192.168.4.31:11434 for Ollama)",
+        help="provider base URL (e.g. http://127.0.0.1:11434 for Ollama)",
     )
     models_set_p.add_argument(
         "--clear-api-base",

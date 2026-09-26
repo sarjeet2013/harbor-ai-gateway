@@ -24,7 +24,7 @@ from edge.models_yaml import (
 def test_normalize_litellm_model_prefixes():
     assert (
         normalize_litellm_model(
-            "qwen3:8b", pool="cheap", api_base="http://192.168.4.31:11434"
+            "qwen3:8b", pool="cheap", api_base="http://127.0.0.1:11434"
         )
         == "ollama_chat/qwen3:8b"
     )
@@ -71,16 +71,16 @@ def test_apply_pool_set_updates_temp_yaml(tmp_path: Path):
         loaded,
         "cheap",
         model="qwen3:8b",
-        api_base="http://192.168.4.31:11434",
+        api_base="http://127.0.0.1:11434",
     )
     assert entry["litellm_model"] == "ollama_chat/qwen3:8b"
-    assert entry["api_base"] == "http://192.168.4.31:11434"
+    assert entry["api_base"] == "http://127.0.0.1:11434"
     dump_raw_yaml(path, loaded)
 
     again = yaml.safe_load(path.read_text())
     cheap0 = again["models"]["cheap"][0]
     assert cheap0["litellm_model"] == "ollama_chat/qwen3:8b"
-    assert cheap0["api_base"] == "http://192.168.4.31:11434"
+    assert cheap0["api_base"] == "http://127.0.0.1:11434"
 
     # expensive cloud bump + clear any api_base
     apply_pool_set(
@@ -114,7 +114,7 @@ def test_list_pool_rows_and_enabled_filter():
                 ModelSpec(
                     name="c1",
                     litellm_model="ollama_chat/qwen3:8b",
-                    api_base="http://192.168.4.31:11434",
+                    api_base="http://127.0.0.1:11434",
                 )
             ],
             expensive=[
@@ -141,7 +141,7 @@ def test_collect_ollama_bases():
                 ModelSpec(
                     name="c1",
                     litellm_model="ollama_chat/qwen3:8b",
-                    api_base="http://192.168.4.31:11434",
+                    api_base="http://127.0.0.1:11434",
                 )
             ],
             expensive=[
@@ -149,14 +149,14 @@ def test_collect_ollama_bases():
                 ModelSpec(
                     name="e2",
                     litellm_model="ollama_chat/llama3.2:3b",
-                    api_base="http://192.168.4.31:11434",  # dedupe
+                    api_base="http://127.0.0.1:11434",  # dedupe
                 ),
             ],
         )
     )
     bases = collect_ollama_bases(cfg)
     assert len(bases) == 1
-    assert bases[0]["api_base"] == "http://192.168.4.31:11434"
+    assert bases[0]["api_base"] == "http://127.0.0.1:11434"
 
 
 def test_is_ollama_api_base():
@@ -176,7 +176,7 @@ def test_probe_ollama_tags_ok():
     mock_client.__exit__.return_value = None
     mock_client.get.return_value = mock_resp
     with patch("httpx.Client", return_value=mock_client):
-        ok, names, err = probe_ollama_tags("http://192.168.4.31:11434")
+        ok, names, err = probe_ollama_tags("http://127.0.0.1:11434")
     assert ok is True
     assert names == ["qwen3:8b", "llama3.2:3b"]
     assert err is None
@@ -202,7 +202,7 @@ def test_cli_models_list_and_dry_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
                     {
                         "name": "ollama-cheap",
                         "litellm_model": "ollama_chat/qwen3:8b",
-                        "api_base": "http://192.168.4.31:11434",
+                        "api_base": "http://127.0.0.1:11434",
                     }
                 ],
                 "expensive": [

@@ -13,7 +13,7 @@ class JudgeConfig(BaseModel):
 
     enabled: bool = True
     litellm_model: str = "ollama_chat/qwen3:8b"
-    api_base: str = "http://192.168.4.31:11434"
+    api_base: str = "http://127.0.0.1:11434"
     timeout_ms: int = 400
     min_confidence: float = 0.55
     on_failure: str = "heuristic"  # heuristic

@@ -1,6 +1,6 @@
 # Harbor AI Gateway — Architecture (v0)
 
-Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `edge/config.py`, `edge/main.py`, `edge/litellm_gen.py`, `edge/cache.py`, `edge/proxy.py`).
+Security: [SECURITY.md](SECURITY.md). Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `edge/config.py`, `edge/main.py`, `edge/litellm_gen.py`, `edge/cache.py`, `edge/proxy.py`).
 
 ## Components
 
@@ -9,12 +9,12 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 3. **Day budget** — spend-so-far vs `daily_budget_usd`; over budget → `on_budget_exceeded` (`force_cheap` | `reject`). Persisted to `budget_state_path` (default `data/budget.json`). Pure cache hits do **not** increment spend.
 4. **Router (judge default)** — classify request; pick from `models.cheap` / `models.expensive` pools (alias = each entry’s `name`). Live default **`judge_then_heuristic`**: local Ollama judge (`qwen3:8b`) with keyword/length **heuristic fallback** — see [features/routing.md](features/routing.md).
 5. **Response cache** — exact + optional semantic cache on disk (`data/cache/`); see [features/cache.md](features/cache.md). Semantic = exact-first then Ollama embeddings + cosine threshold.
-6. **Ledger** — JSONL at `ledger_path` (default `logs/ledger.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields when implemented (`cache_hit`, `cache_kind`, `tokens_saved*`).
+6. **Ledger** — JSONL at `ledger_path` (default `logs/ledger.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields (`cache_hit`, `cache_kind`, `tokens_saved*`).
 7. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
 8. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
-   Default pools are **hybrid**: Ollama cheap + OpenAI expensive — see [features/hybrid.md](features/hybrid.md).
+   Default pools are **hybrid**: Ollama cheap (any reachable `api_base`) + OpenAI expensive — see [features/hybrid.md](features/hybrid.md).
    Chat + Anthropic **streaming** (`stream: true`) is SSE passthrough (or synthesized SSE on cache hit); OpenAI `/v1/responses` returns 501 for `stream: true`. Stream requests share the response cache with non-stream. See [features/streaming.md](features/streaming.md) and [features/cache.md](features/cache.md).
-9. **Config** — single canonical `config/gateway.yaml`. LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
+9. **Config** — local `config/gateway.yaml` (gitignored; copy from `gateway.yaml.example`). LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
 
 ## Surfaces (edge)
 
