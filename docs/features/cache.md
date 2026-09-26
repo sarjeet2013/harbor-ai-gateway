@@ -43,10 +43,22 @@ No embedding calls. Module: `edge/cache.py`. Integrated in `edge/main.py` **afte
 
 **Embedding backend (MVP):** Ollama HTTP via `httpx` — `POST {embedding_api_base}/api/embeddings` with `{"model", "prompt"}` (falls back to `/api/embed` if 404). Default `embedding_api_base` is the cheap pool’s `api_base` (Mini), else `http://127.0.0.1:11434`.
 
+## Streaming + cache
+
+`stream: true` participates in the **same** exact/semantic cache as non-stream:
+
+- **Key identity:** `stream` is **not** part of the hash / sampling fingerprint. Stream and non-stream requests with the same surface/model/pool/messages/tools/sampling share entries.
+- **Hit + stream:** Edge synthesizes SSE from the cached complete JSON body (`text/event-stream`), sets ledger `cache_hit` / `cache_kind` / `tokens_saved*`, skips upstream, no budget charge.
+  - `/v1/chat/completions` → OpenAI chat.completion.chunk SSE ending with `data: [DONE]`
+  - `/v1/messages` → Anthropic Messages SSE (`message_start` … `message_stop`)
+- **Miss + stream:** Passthrough upstream SSE to the client (chat keeps TTFB). Concurrently accumulate bytes; on a **successful complete** stream, reconstruct the JSON body and `cache.set` (exact entry + embedding in semantic mode). Soft-fail embed errors as today.
+- **Not stored:** Mid-stream upstream errors, incomplete streams (no `[DONE]` / no `message_stop`), or explicit bypass headers.
+
+See [streaming.md](streaming.md).
+
 ## Out of scope / next
 
 - **Intelligent (judge) routing** — planned **after** cache. Not built yet; Omnigent-style smart routing is a follow-on, not a substitute for tokens-saved cache.
-- Streaming responses — **not cached** (`stream: true` bypasses cache). Chat SSE passthrough is shipping — see [streaming.md](streaming.md).
 - Multi-node / Redis shared cache.
 
 ## Storage
@@ -87,7 +99,7 @@ Example hit line (fields abbreviated):
 | --- | --- |
 | `ttl_seconds` | Entries older than TTL are dropped |
 | `max_entries` | FIFO eviction when full |
-| Streaming | `stream: true` → skip cache (do not store) |
+| Streaming | Participates in cache (same key as non-stream); incomplete/failed streams are not stored |
 | Bypass header | `X-Cache-Bypass: 1` (or `true`) |
 | Cache-Control | `Cache-Control: no-cache` / `no-store` |
 | Body | `cache_control` string containing `no-cache`, or `cache_control: false` |
@@ -123,8 +135,9 @@ python -m edge stop && python -m edge start -d
 
 1. `edge/cache.py` — `normalize_for_hash`, `cacheable_text`, `cosine_similarity`, Ollama embed, `get` / `set`, disk persistence, TTL, max_entries.
 2. `edge/main.py` `_handle` — after `pick_model`, before mock/LiteLLM:
-   - On hit → return cached body; ledger with savings; **no** `budget.record`.
-   - On miss → upstream; on success store entry (+ embedding in semantic mode); ledger miss fields.
+   - On hit → return cached JSON, or synthesize SSE when `stream: true`; ledger with savings; **no** `budget.record`.
+   - On miss → upstream (JSON or SSE tee); on success store entry (+ embedding in semantic mode); ledger miss fields.
+   - Helpers in `edge/translate.py`: `iter_openai_sse_from_cached_chat`, `iter_anthropic_sse_from_cached_message`, `openai_chat_sse_to_completion`, `anthropic_sse_to_message`.
 3. `python -m edge cache-stats` — hit rate + `tokens_saved` totals from ledger + disk entry count.
 
 ## Testing notes
@@ -132,7 +145,7 @@ python -m edge stop && python -m edge start -d
 - Unit: hash stability; cosine; semantic hit when vectors similar; exact preferred; threshold miss; embed failure → miss; `mode: exact` never calls embed (mock).
 - Integration (mock): two identical `POST /v1/chat/completions` → second ledger line has `cache_hit: true`, `cache_kind: exact`.
 - Bypass: `X-Cache-Bypass: 1` forces miss.
-- Streaming: `"stream": true` never hits/stores.
+- Streaming: `"stream": true` exact/semantic hit returns SSE; miss stores entry usable by later stream or non-stream; bypass headers still skip; incomplete streams do not store.
 
 ```bash
 # Mac / local

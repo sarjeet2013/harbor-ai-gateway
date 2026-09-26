@@ -6,7 +6,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from edge.cache import should_bypass_cache
+import httpx
+
+from edge.cache import ResponseCache, should_bypass_cache
 from edge.config import CacheConfig, GatewayConfig, ModelsConfig, ModelSpec
 from edge.main import create_app
 
@@ -93,27 +95,212 @@ def test_non_stream_chat_still_works(tmp_path: Path):
     assert "mock:" in data["choices"][0]["message"]["content"]
 
 
-def test_stream_bypasses_cache(tmp_path: Path):
-    assert should_bypass_cache({"stream": True}, None) is True
+def test_stream_alone_not_bypass():
+    assert should_bypass_cache({"stream": True}, None) is False
+    assert should_bypass_cache({"stream": True}, {"X-Cache-Bypass": "1"}) is True
+
+
+def test_stream_exact_hit_returns_sse_no_upstream(tmp_path: Path):
+    """stream=true exact hit synthesizes SSE and does not call upstream (mock still fine)."""
+    cfg = _mock_cfg(tmp_path)
+    app = create_app(cfg)
+    client = TestClient(app)
+    # Seed via non-stream so we know the stored body id
+    seed = {
+        "model": "mock-cheap",
+        "messages": [{"role": "user", "content": "stream exact hit seed"}],
+    }
+    r0 = client.post("/v1/chat/completions", json=seed)
+    assert r0.status_code == 200
+    seeded_id = r0.json()["id"]
+    seeded_content = r0.json()["choices"][0]["message"]["content"]
+
+    # Stream request with same prompt → exact hit → SSE replay
+    payload = {**seed, "stream": True}
+    r1 = client.post("/v1/chat/completions", json=payload)
+    assert r1.status_code == 200
+    assert "text/event-stream" in r1.headers.get("content-type", "")
+    body = r1.text
+    assert "data:" in body
+    assert "[DONE]" in body
+    assert seeded_id in body
+    assert "chat.completion.chunk" in body
+    # Content from cache appears in deltas
+    assert "stream exact hit seed" in body or seeded_content.split("echo:")[-1].strip()[:20] in body
+
+    lines = (tmp_path / "ledger.jsonl").read_text().strip().splitlines()
+    hit = json.loads(lines[-1])
+    assert hit["cache_hit"] is True
+    assert hit["cache_kind"] == "exact"
+    assert hit.get("stream") is True
+    assert hit["cost_usd"] == 0.0
+    assert hit["tokens_saved"] > 0
+
+
+def test_stream_miss_stores_usable_by_nonstream_and_stream(tmp_path: Path):
     cfg = _mock_cfg(tmp_path)
     app = create_app(cfg)
     client = TestClient(app)
     payload = {
         "model": "mock-cheap",
         "stream": True,
-        "messages": [{"role": "user", "content": "same stream twice"}],
+        "messages": [{"role": "user", "content": "stream miss then hit"}],
     }
     r1 = client.post("/v1/chat/completions", json=payload)
+    assert r1.status_code == 200
+    _ = r1.text
+    miss = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert miss["cache_hit"] is False
+    assert miss.get("stream") is True
+
+    # Non-stream same prompt → exact hit from stream-stored entry
+    r2 = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "mock-cheap",
+            "messages": [{"role": "user", "content": "stream miss then hit"}],
+        },
+    )
+    assert r2.status_code == 200
+    assert r2.headers.get("content-type", "").startswith("application/json")
+    hit_ns = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert hit_ns["cache_hit"] is True
+    assert hit_ns["cache_kind"] == "exact"
+
+    # Stream again → SSE hit
+    r3 = client.post("/v1/chat/completions", json=payload)
+    assert r3.status_code == 200
+    assert "[DONE]" in r3.text
+    hit_s = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert hit_s["cache_hit"] is True
+    assert hit_s.get("stream") is True
+
+
+def test_stream_still_bypasses_with_header(tmp_path: Path):
+    cfg = _mock_cfg(tmp_path)
+    app = create_app(cfg)
+    client = TestClient(app)
+    payload = {
+        "model": "mock-cheap",
+        "stream": True,
+        "messages": [{"role": "user", "content": "bypass stream store"}],
+    }
+    client.post("/v1/chat/completions", json=payload)
+    # Force miss via bypass even though entry may exist from first call…
+    # First call without bypass stored; second with bypass must miss.
+    r2 = client.post(
+        "/v1/chat/completions",
+        json=payload,
+        headers={"X-Cache-Bypass": "1"},
+    )
+    assert r2.status_code == 200
+    _ = r2.text
+    row = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert row["cache_hit"] is False
+    assert row.get("stream") is True
+
+
+def test_stream_semantic_hit(tmp_path: Path):
+    """stream=true semantic hit when mode=semantic and embeddings match."""
+    shared = [0.8, 0.2, 0.1]
+
+    class _FakeEmbedTransport(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/api/embeddings"):
+                return httpx.Response(200, json={"embedding": shared})
+            return httpx.Response(404, json={"error": "not found"})
+
+    cfg = _mock_cfg(tmp_path)
+    cfg.cache = CacheConfig(
+        enabled=True,
+        mode="semantic",
+        ttl_seconds=86400,
+        max_entries=100,
+        path=str(tmp_path / "cache"),
+        embedding_model="nomic-embed-text",
+        embedding_api_base="http://embed.test",
+        similarity_threshold=0.92,
+    )
+    # Build app then inject fake embed client into cache
+    app = create_app(cfg)
+    app.state.cache._http = httpx.Client(transport=_FakeEmbedTransport())
+
+    client = TestClient(app)
+    # Store via non-stream
+    r0 = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "mock-cheap",
+            "messages": [{"role": "user", "content": "how do I reset my password"}],
+        },
+    )
+    assert r0.status_code == 200
+    seeded_id = r0.json()["id"]
+
+    # Paraphrase + stream → semantic hit SSE
+    r1 = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "mock-cheap",
+            "stream": True,
+            "messages": [
+                {"role": "user", "content": "what's the way to reset a password"}
+            ],
+        },
+    )
+    assert r1.status_code == 200
+    assert "text/event-stream" in r1.headers.get("content-type", "")
+    assert seeded_id in r1.text
+    assert "[DONE]" in r1.text
+    hit = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert hit["cache_hit"] is True
+    assert hit["cache_kind"] == "semantic"
+    assert hit.get("stream") is True
+
+
+def test_failed_incomplete_stream_does_not_poison_cache(tmp_path: Path):
+    """Incomplete OpenAI SSE (no [DONE]) must not be stored."""
+    from edge.translate import openai_chat_sse_to_completion, anthropic_sse_to_message
+
+    incomplete = b'data: {"id":"x","object":"chat.completion.chunk","choices":[{"delta":{"content":"hi"},"finish_reason":null}]}\n\n'
+    assert openai_chat_sse_to_completion(incomplete) is None
+
+    incomplete_anth = (
+        b"event: message_start\n"
+        b'data: {"type":"message_start","message":{"id":"m1","model":"m","role":"assistant","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}\n\n'
+        b"event: content_block_delta\n"
+        b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}\n\n'
+    )
+    assert anthropic_sse_to_message(incomplete_anth) is None
+
+    # Also: bypass header on stream miss path must not leave a hit for next call
+    # when we only ever called with bypass (nothing stored).
+    cfg = _mock_cfg(tmp_path)
+    app = create_app(cfg)
+    client = TestClient(app)
+    payload = {
+        "model": "mock-cheap",
+        "stream": True,
+        "messages": [{"role": "user", "content": "never store me"}],
+    }
+    r1 = client.post(
+        "/v1/chat/completions", json=payload, headers={"X-Cache-Bypass": "1"}
+    )
+    assert r1.status_code == 200
+    _ = r1.text
+    # Without bypass — should be a miss (nothing was stored under bypass)
     r2 = client.post("/v1/chat/completions", json=payload)
-    assert r1.status_code == 200 and r2.status_code == 200
-    # Distinct completion ids across streams (not a cached JSON body)
-    assert r1.text != r2.text or "chatcmpl-mock-" in r1.text
+    assert r2.status_code == 200
+    _ = r2.text
     lines = (tmp_path / "ledger.jsonl").read_text().strip().splitlines()
-    assert len(lines) >= 2
-    for line in lines[-2:]:
-        row = json.loads(line)
-        assert row["cache_hit"] is False
-        assert row.get("stream") is True
+    # First was bypass miss; second is miss-then-store (still cache_hit false)
+    assert json.loads(lines[-1])["cache_hit"] is False
+    # Third call should hit
+    r3 = client.post("/v1/chat/completions", json=payload)
+    _ = r3.text
+    assert json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])[
+        "cache_hit"
+    ] is True
 
 
 def test_messages_stream_anthropic_sse(tmp_path: Path):
@@ -158,3 +345,33 @@ def test_responses_stream_returns_501(tmp_path: Path):
         },
     )
     assert r.status_code == 501
+
+
+def test_messages_stream_exact_hit(tmp_path: Path):
+    """Non-stream /v1/messages store → stream hit returns Anthropic SSE."""
+    cfg = _mock_cfg(tmp_path)
+    app = create_app(cfg)
+    client = TestClient(app)
+    seed = {
+        "model": "mock-cheap",
+        "max_tokens": 32,
+        "messages": [{"role": "user", "content": "messages stream cache seed"}],
+    }
+    r0 = client.post("/v1/messages", json=seed)
+    assert r0.status_code == 200
+    seeded_text = r0.json()["content"][0]["text"]
+
+    r1 = client.post("/v1/messages", json={**seed, "stream": True})
+    assert r1.status_code == 200
+    assert "text/event-stream" in r1.headers.get("content-type", "")
+    body = r1.text
+    assert "event: message_start" in body
+    assert "event: message_stop" in body
+    assert "text_delta" in body
+    # Cached assistant text appears in deltas
+    assert "messages stream cache seed" in body or seeded_text[:30] in body
+    hit = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert hit["cache_hit"] is True
+    assert hit["cache_kind"] == "exact"
+    assert hit["surface"] == "anthropic.messages"
+    assert hit.get("stream") is True

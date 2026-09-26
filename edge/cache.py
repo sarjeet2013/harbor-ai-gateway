@@ -189,9 +189,12 @@ def extract_usage_tokens(result: dict[str, Any]) -> tuple[int, int, int]:
 
 
 def should_bypass_cache(body: dict[str, Any], headers: dict[str, str] | None) -> bool:
-    """Skip cache for streaming or explicit bypass."""
-    if body.get("stream") is True:
-        return True
+    """Skip cache for explicit bypass headers/body flags.
+
+    ``stream: true`` is *not* a bypass — stream and non-stream share the same
+    cache key (``stream`` is omitted from ``normalize_for_hash``). Hits replay
+    as synthesized SSE; misses tee-store the completed body.
+    """
     if headers:
         for k, v in headers.items():
             lk = k.lower()

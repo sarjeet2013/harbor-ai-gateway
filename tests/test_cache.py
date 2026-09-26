@@ -79,7 +79,8 @@ def test_disk_get_set_and_ttl(tmp_path: Path):
 
 
 def test_should_bypass_stream_and_headers():
-    assert should_bypass_cache({"stream": True}, None) is True
+    # stream alone is NOT a bypass — stream shares the non-stream cache key
+    assert should_bypass_cache({"stream": True}, None) is False
     assert should_bypass_cache({}, {"X-Cache-Bypass": "1"}) is True
     assert should_bypass_cache({}, {"Cache-Control": "no-cache"}) is True
     assert should_bypass_cache({"messages": []}, None) is False

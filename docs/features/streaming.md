@@ -2,7 +2,7 @@
 
 **Status:** **Shipped (v1 chat + Anthropic messages).** `POST /v1/chat/completions` with `"stream": true` returns OpenAI-style SSE; `POST /v1/messages` with `"stream": true` returns Anthropic Messages SSE (via chat upstream + remap) (`text/event-stream`) via passthrough from LiteLLM/Ollama, or mock SSE when `upstream_mode: mock`. OpenAI Responses streaming is **not** shipped — `/v1/responses` returns **HTTP 501** if `stream: true`. Anthropic Messages streaming is shipped (Claude Code).
 
-`stream: true` **bypasses the response cache** (no hit/store) — see [cache.md](cache.md). After a chat stream completes successfully, the edge writes **one** ledger line and calls `budget.record` once (usage parsed from the final SSE chunk when present; otherwise tokens empty / cost from estimates). Mid-stream failure → ledger `status` reflects the error.
+`stream: true` uses the **same response cache** as non-stream (exact + semantic) — see [cache.md](cache.md). On a **hit**, the edge synthesizes OpenAI or Anthropic SSE from the cached complete JSON body (no upstream). On a **miss**, upstream SSE is passed through to the client while the edge accumulates bytes; a successful complete stream is stored for later hits. After a stream completes successfully, the edge writes **one** ledger line and calls `budget.record` once on misses (usage parsed from the final SSE chunk when present; otherwise tokens empty / cost from estimates). Pure cache hits do not charge budget. Mid-stream failure → ledger `status` reflects the error and **nothing is stored**.
 
 ## What clients need
 
@@ -16,10 +16,10 @@ OpenAI-style SSE on `POST /v1/chat/completions` and Anthropic Messages SSE on `P
 2. **Branch in `_handle`** — when `body.stream is True` and surface is chat (`openai.chat.completions`), use the stream path instead of buffering JSON. Keep today’s JSON path for `stream: false` / omitted.
 3. **Mock SSE** — `upstream_mode: mock` emits OpenAI-compatible chat-completion SSE ending with `data: [DONE]`.
 4. **Ledger + budget on complete** — after the upstream stream finishes, write **one** ledger line and call `budget.record` once. Do not charge per chunk. On mid-stream failure, ledger `status` should reflect the error.
-5. **Cache** — leave as today: `stream: true` → `should_bypass_cache` (no get/set). Optional later: buffer-and-store full completion while still streaming to the client (out of scope for v1).
-6. **Smoke** — curl with `"stream": true`, assert `data:` lines (+ `[DONE]` when mock).
+5. **Cache** — **shipped:** `stream: true` lookups/stores share the non-stream key (`stream` omitted from hash). Hit → synthesize SSE; miss → tee-store on complete. Explicit bypass headers still skip cache.
+6. **Smoke** — curl with `"stream": true`, assert `data:` lines (+ `[DONE]` when mock); second identical stream should ledger `cache_hit: true`.
 
-**Not required for v1:** new dependencies, LiteLLM config changes, semantic cache, judge routing.
+**Not required for v1:** new dependencies, LiteLLM config changes, judge routing.
 
 ### Later — other surfaces
 
@@ -34,9 +34,14 @@ OpenAI-style SSE on `POST /v1/chat/completions` and Anthropic Messages SSE on `P
 3. Smoke — **done**
 4. Messages / Responses SSE only when a real client is blocked
 
+## Limits
+
+- **Anthropic messages miss path** still **collect-then-remap** OpenAI chat SSE before emitting Anthropic events (`openai_chat_sse_to_anthropic_sse`). Cache **store** and **hit replay** work; miss TTFB for `/v1/messages` remains buffered until the upstream chat stream finishes. Token-at-a-time Anthropic remap is a follow-on.
+- OpenAI `/v1/responses` streaming remains **501**.
+
 ## Out of scope for this note
 
-Semantic cache. Judge routing. (Hybrid Ollama cheap + OpenAI expensive is shipped — see [hybrid.md](hybrid.md).)
+Judge routing. (Hybrid Ollama cheap + OpenAI expensive is shipped — see [hybrid.md](hybrid.md). Semantic response cache is shipped — see [cache.md](cache.md).)
 
 ## Troubleshooting (Ollama stream)
 

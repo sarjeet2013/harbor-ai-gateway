@@ -21,11 +21,16 @@ from .mock_upstream import (
 from .proxy import LiteLLMProxy
 from .router import pick_model
 from .translate import (
+    anthropic_sse_to_message,
     anthropic_to_chat,
     chat_to_anthropic,
     chat_to_responses,
+    iter_anthropic_sse_from_cached_chat,
+    iter_anthropic_sse_from_cached_message,
+    iter_openai_sse_from_cached_chat,
     openai_chat_sse_to_anthropic_sse,
     openai_chat_sse_to_anthropic_sse_sync,
+    openai_chat_sse_to_completion,
     responses_to_chat,
 )
 from .ledger import Ledger
@@ -108,9 +113,15 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         decision: Any,
         client_model: Any,
         est: float,
+        bypass: bool,
         translate: str | None = None,
     ) -> Response:
-        """SSE for chat (passthrough) and Anthropic messages (chat upstream + remap)."""
+        """SSE for chat (passthrough) and Anthropic messages (chat upstream + remap).
+
+        On successful complete streams, tee-store the reconstructed JSON body into
+        the response cache (same key space as non-stream). Mid-stream errors and
+        incomplete streams do not poison the cache.
+        """
 
         async def _tee_and_record(
             chunks: AsyncIterator[bytes] | Iterator[bytes],
@@ -137,6 +148,22 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 cost = est
                 if status == "ok":
                     budget.record(cost)
+                    # Store completed stream into the same cache as non-stream.
+                    if cache.enabled and not bypass:
+                        raw = bytes(collected)
+                        stored: dict[str, Any] | None = None
+                        if surface == _CHAT_SURFACE:
+                            stored = openai_chat_sse_to_completion(raw)
+                        elif surface == _MESSAGES_SURFACE:
+                            stored = anthropic_sse_to_message(raw)
+                        if stored is not None:
+                            cache.set(
+                                body,
+                                model=decision.model,
+                                pool=decision.pool,
+                                surface=surface,
+                                response=stored,
+                            )
                 ledger.write(
                     {
                         "surface": surface,
@@ -299,6 +326,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             )
             if hit is not None:
                 # Pure cache hit: do not increment day spend.
+                want_stream = body.get("stream") is True and surface in _STREAM_SURFACES
                 ledger.write(
                     {
                         "surface": surface,
@@ -320,8 +348,33 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                         "tokens_saved": hit.tokens_saved,
                         "tokens_saved_prompt": hit.tokens_saved_prompt,
                         "tokens_saved_completion": hit.tokens_saved_completion,
+                        "stream": want_stream,
                     }
                 )
+                if want_stream:
+                    # Replay cached complete JSON as surface-appropriate SSE.
+                    if surface == _CHAT_SURFACE:
+                        return StreamingResponse(
+                            iter_openai_sse_from_cached_chat(hit.body),
+                            media_type="text/event-stream",
+                        )
+                    if surface == _MESSAGES_SURFACE:
+                        # Cached body is Anthropic message shape for this surface.
+                        cached = hit.body
+                        if cached.get("object") == "chat.completion" or (
+                            isinstance(cached.get("choices"), list)
+                        ):
+                            # Defensive: convert OpenAI-shaped entry if present.
+                            return StreamingResponse(
+                                iter_anthropic_sse_from_cached_chat(
+                                    cached, model=decision.model
+                                ),
+                                media_type="text/event-stream",
+                            )
+                        return StreamingResponse(
+                            iter_anthropic_sse_from_cached_message(cached),
+                            media_type="text/event-stream",
+                        )
                 return JSONResponse(hit.body, status_code=200)
 
         est = (
@@ -330,7 +383,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             else config.cost_estimates_usd.expensive_per_request
         )
 
-        # Streaming path (cache already bypassed via should_bypass_cache)
+        # Streaming path (cache miss — tee upstream and store on complete)
         if body.get("stream") is True and surface in _STREAM_SURFACES:
             return await _handle_stream(
                 body=body,
@@ -340,6 +393,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 decision=decision,
                 client_model=client_model,
                 est=est,
+                bypass=bypass,
                 translate=translate,
             )
 
