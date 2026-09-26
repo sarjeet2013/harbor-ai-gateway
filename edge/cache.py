@@ -32,6 +32,9 @@ _SAMPLING_KEYS = (
 
 _DEFAULT_EMBED_BASE = "http://127.0.0.1:11434"
 _EMBED_TIMEOUT_S = 10.0
+# Keep embed prompts under typical nomic-embed-text context (Claude Code system alone can be 100k+ chars).
+_MAX_EMBED_CHARS = 6000
+_SEMANTIC_SCOPES = ("full", "last_user")
 
 
 def _stable_json(obj: Any) -> str:
@@ -100,22 +103,100 @@ def _content_to_text(content: Any) -> str:
     return str(content)
 
 
-def cacheable_text(body: dict[str, Any]) -> str:
-    """Textual parts for embedding — messages/system/input, not full tool JSON."""
+def _system_to_text(system: Any) -> str:
+    """Flatten Anthropic/OpenAI system field to plain text."""
+    if system is None:
+        return ""
+    if isinstance(system, list):
+        parts: list[str] = []
+        for block in system:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            elif isinstance(block, str):
+                parts.append(block)
+            else:
+                parts.append(_content_to_text(block))
+        return "\n".join(p for p in parts if p and str(p).strip())
+    return _content_to_text(system)
+
+
+def system_fingerprint(body: dict[str, Any]) -> str:
+    """Stable hash of system prompt — semantic filter when scope strips history."""
+    sys_text = _system_to_text(body.get("system"))
+    if not sys_text.strip():
+        return ""
+    return hashlib.sha256(sys_text.encode("utf-8")).hexdigest()
+
+
+def _last_user_from_messages(messages: Any) -> str:
+    if not isinstance(messages, list):
+        return ""
+    for msg in reversed(messages):
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role") or "") != "user":
+            continue
+        text = _content_to_text(msg.get("content"))
+        if text.strip():
+            return text
+    return ""
+
+
+def _last_user_from_input(inp: Any) -> str:
+    if inp is None:
+        return ""
+    if isinstance(inp, str):
+        return inp
+    if isinstance(inp, list):
+        for item in reversed(inp):
+            if isinstance(item, str) and item.strip():
+                return item
+            if isinstance(item, dict) and str(item.get("role") or "") == "user":
+                text = _content_to_text(item.get("content") or item.get("text"))
+                if text.strip():
+                    return text
+    return _content_to_text(inp)
+
+
+def _truncate_embed_text(system_text: str, user_text: str, *, max_chars: int = _MAX_EMBED_CHARS) -> str:
+    """Prefer keeping the full last user message; truncate system to fit embed context."""
+    user_part = f"user: {user_text}" if user_text.strip() else ""
+    sys_part = f"system: {system_text}" if system_text.strip() else ""
+    if not sys_part:
+        return user_part[:max_chars]
+    if not user_part:
+        return sys_part[:max_chars]
+    # Reserve space for user (never truncate user below its full length unless user alone exceeds cap).
+    if len(user_part) >= max_chars:
+        return user_part[:max_chars]
+    budget = max_chars - len(user_part) - 1  # newline
+    if len(sys_part) > budget:
+        sys_part = sys_part[: max(0, budget)]
+    if sys_part:
+        return f"{sys_part}\n{user_part}"
+    return user_part
+
+
+def cacheable_text(body: dict[str, Any], *, scope: str = "full") -> str:
+    """Textual parts for embedding — messages/system/input, not full tool JSON.
+
+    scope:
+      - ``full``: system + all message/input turns (legacy).
+      - ``last_user``: system (+ truncated) + last user turn only — so multi-turn
+        agent loops (Claude Code) can still semantic-match paraphrases of the
+        *current* prompt. Exact hash stays full-request either way.
+    """
+    if scope == "last_user":
+        system_text = _system_to_text(body.get("system"))
+        user_text = _last_user_from_messages(body.get("messages"))
+        if not user_text.strip():
+            user_text = _last_user_from_input(body.get("input"))
+        return _truncate_embed_text(system_text, user_text)
+
     chunks: list[str] = []
-    system = body.get("system")
-    if system is not None:
-        if isinstance(system, list):
-            # Anthropic-style system blocks
-            for block in system:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    chunks.append(str(block.get("text") or ""))
-                elif isinstance(block, str):
-                    chunks.append(block)
-                else:
-                    chunks.append(_content_to_text(block))
-        else:
-            chunks.append(_content_to_text(system))
+    system_text = _system_to_text(body.get("system"))
+    if system_text.strip():
+        chunks.append(system_text)
     messages = body.get("messages")
     if isinstance(messages, list):
         for msg in messages:
@@ -311,6 +392,14 @@ class ResponseCache:
             return 0.92
         return float(thr)
 
+    @property
+    def semantic_scope(self) -> str:
+        scope = getattr(self._cfg, "semantic_scope", None) or "full"
+        scope = str(scope).strip().lower()
+        if scope not in _SEMANTIC_SCOPES:
+            return "full"
+        return scope
+
     def embedding_api_base(self) -> str:
         base = self._cfg.embedding_api_base or self._default_embedding_api_base
         if not base:
@@ -401,13 +490,15 @@ class ResponseCache:
             pass
 
         # Embed outside the lock so we don't block other requests on Ollama.
-        query_vec = self._embed(cacheable_text(body))
+        scope = self.semantic_scope
+        query_vec = self._embed(cacheable_text(body, scope=scope))
         if query_vec is None:
             return None
 
         samp = sampling_fingerprint(body)
         threshold = self.similarity_threshold
         embed_model = self.embedding_model()
+        sys_fp = system_fingerprint(body) if scope == "last_user" else None
 
         with self._lock:
             now = time.time()
@@ -426,6 +517,7 @@ class ResponseCache:
                 embed_model=embed_model,
                 exclude_key=key,
                 now=now,
+                system_fp=sys_fp,
             )
 
     def _get_exact_unlocked(self, key: str, now: float) -> CacheHit | None:
@@ -478,6 +570,7 @@ class ResponseCache:
         embed_model: str | None,
         exclude_key: str,
         now: float,
+        system_fp: str | None = None,
     ) -> CacheHit | None:
         best_key: str | None = None
         best_sim = -1.0
@@ -494,6 +587,10 @@ class ResponseCache:
                 continue
             if embed_model and meta.get("embed_model") and meta.get("embed_model") != embed_model:
                 continue
+            if system_fp is not None:
+                # last_user scope: require same system prompt (exact hash may differ on history)
+                if meta.get("system_fingerprint", "") != system_fp:
+                    continue
             stored_samp = meta.get("sampling")
             if isinstance(stored_samp, dict):
                 if stored_samp != sampling:
@@ -563,9 +660,11 @@ class ResponseCache:
         )
         prompt_t, completion_t, total_t = extract_usage_tokens(response)
         now = time.time()
-        text = cacheable_text(body)
+        scope = self.semantic_scope
+        text = cacheable_text(body, scope=scope)
         fp = text_fingerprint(text) if text else None
         samp = sampling_fingerprint(body)
+        sys_fp = system_fingerprint(body)
 
         embedding: list[float] | None = None
         embed_model: str | None = None
@@ -585,6 +684,8 @@ class ResponseCache:
             "tokens_total": total_t,
             "response": response,
             "sampling": samp,
+            "semantic_scope": scope,
+            "system_fingerprint": sys_fp,
         }
         if fp:
             entry["text_fingerprint"] = fp
@@ -610,6 +711,8 @@ class ResponseCache:
                 "embed_model": embed_model,
                 "sampling": samp,
                 "text_fingerprint": fp,
+                "semantic_scope": scope,
+                "system_fingerprint": sys_fp,
             }
             self._save_index_unlocked()
         return key
@@ -631,6 +734,9 @@ class ResponseCache:
                 if self.mode == "semantic"
                 else None,
                 "embedding_model": self.embedding_model()
+                if self.mode == "semantic"
+                else None,
+                "semantic_scope": self.semantic_scope
                 if self.mode == "semantic"
                 else None,
             }

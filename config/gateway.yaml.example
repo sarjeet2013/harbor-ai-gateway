@@ -67,3 +67,6 @@ cache:
   embedding_model: nomic-embed-text
   # embedding_api_base: http://192.168.4.31:11434  # default: cheap pool api_base
   similarity_threshold: 0.92
+  # last_user helps agent loops (Claude Code): embed last user (+ truncated system), not full history.
+  # Exact hash remains full-request. Filter also requires matching system_fingerprint + sampling/tools.
+  semantic_scope: last_user   # full | last_user

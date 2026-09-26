@@ -36,12 +36,21 @@ No embedding calls. Module: `edge/cache.py`. Integrated in `edge/main.py` **afte
 **Exact-first**, then embedding similarity:
 
 1. Same exact-hash path as today → hit with `cache_kind: exact`.
-2. On exact miss: embed **cacheable text** (normalized user/system/messages/input content — not full tool JSON). Compare cosine similarity to stored embeddings for entries with the **same** `model`, `pool`, and `surface`. Candidates whose sampling keys (`temperature`, `max_tokens`, `tools`, …) differ are skipped.
+2. On exact miss: embed **cacheable text** (see `semantic_scope` below — not full tool JSON). Compare cosine similarity to stored embeddings for entries with the **same** `model`, `pool`, and `surface`. Candidates whose sampling keys (`temperature`, `max_tokens`, `tools`, …) differ are skipped. With `semantic_scope: last_user`, candidates must also share the same **system fingerprint**.
 3. If best similarity ≥ `similarity_threshold` (default **0.92**) → hit with `cache_kind: semantic`; return cached body; ledger `tokens_saved*` as today; skip upstream; no budget charge.
 4. On miss: upstream as today; on success store the exact entry **plus** embedding vector (when embed succeeds).
 5. If the embedding provider fails (Ollama down, model missing): **soft-fail** to miss (still store exact without embedding on set; warn once). Never 500 the request because cache embed failed.
 
 **Embedding backend (MVP):** Ollama HTTP via `httpx` — `POST {embedding_api_base}/api/embeddings` with `{"model", "prompt"}` (falls back to `/api/embed` if 404). Default `embedding_api_base` is the cheap pool’s `api_base` (Mini), else `http://127.0.0.1:11434`.
+
+**Semantic scope (`semantic_scope`):**
+
+| Value | Embed text | Why |
+| --- | --- | --- |
+| `full` (default in code) | system + **all** message/input turns | Legacy; multi-turn agent sessions almost never semantic-hit because history growth moves the vector. Huge Claude Code system prompts often **fail embed** (`input length exceeds context`). |
+| `last_user` (live `gateway.yaml`) | system (truncated to fit ~6k chars) + **last user** turn only | Exact hash still covers the full request (rare hit in agent loops). Semantic can match paraphrases of the *same turn shape* across a session. Also stores/filters `system_fingerprint` so different system prompts do not cross-hit. |
+
+Tradeoff: `last_user` may return a prior turn’s answer when the latest user text is similar but earlier context differs. Prefer that over never hitting for Claude Code.
 
 ## Streaming + cache
 
@@ -118,6 +127,7 @@ cache:
   embedding_model: nomic-embed-text
   # embedding_api_base: http://192.168.4.31:11434  # default: cheap pool api_base
   similarity_threshold: 0.92
+  semantic_scope: last_user   # full | last_user (last_user for Claude Code multi-turn)
 ```
 
 Live default stays **`mode: exact`** until the embed model is verified on Mini. `config/gateway.yaml.example` documents **`mode: semantic`**.
@@ -133,7 +143,7 @@ python -m edge stop && python -m edge start -d
 
 ## Implementation
 
-1. `edge/cache.py` — `normalize_for_hash`, `cacheable_text`, `cosine_similarity`, Ollama embed, `get` / `set`, disk persistence, TTL, max_entries.
+1. `edge/cache.py` — `normalize_for_hash`, `cacheable_text` (`semantic_scope`), `cosine_similarity`, Ollama embed, `get` / `set`, disk persistence, TTL, max_entries.
 2. `edge/main.py` `_handle` — after `pick_model`, before mock/LiteLLM:
    - On hit → return cached JSON, or synthesize SSE when `stream: true`; ledger with savings; **no** `budget.record`.
    - On miss → upstream (JSON or SSE tee); on success store entry (+ embedding in semantic mode); ledger miss fields.

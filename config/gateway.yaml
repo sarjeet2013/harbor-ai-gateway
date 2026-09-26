@@ -65,3 +65,5 @@ cache:
   embedding_model: nomic-embed-text
   embedding_api_base: http://192.168.4.31:11434
   similarity_threshold: 0.92
+  # last_user: embed system(+trunc) + last user only (Claude Code multi-turn). Exact hash stays full-request.
+  semantic_scope: last_user   # full | last_user

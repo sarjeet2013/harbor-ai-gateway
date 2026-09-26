@@ -14,6 +14,7 @@ from edge.cache import (
     cacheable_text,
     cosine_similarity,
     normalize_for_hash,
+    system_fingerprint,
     should_bypass_cache,
 )
 from edge.config import CacheConfig, GatewayConfig, ModelsConfig, ModelSpec
@@ -178,6 +179,32 @@ def test_cacheable_text_skips_tools_noise():
     assert "be brief" in text
     assert "function" not in text
     assert "parameters" not in text
+
+
+def test_cacheable_text_last_user_strips_prior_turns():
+    body = {
+        "system": "sys",
+        "messages": [
+            {"role": "user", "content": "turn one"},
+            {"role": "assistant", "content": "reply one"},
+            {"role": "user", "content": "turn two paraphrase"},
+        ],
+    }
+    full = cacheable_text(body, scope="full")
+    last = cacheable_text(body, scope="last_user")
+    assert "turn one" in full and "reply one" in full
+    assert "turn one" not in last and "reply one" not in last
+    assert "turn two paraphrase" in last
+    assert "sys" in last
+    # Exact keys still differ when history grows
+    from edge.cache import cache_key_hash, normalize_for_hash
+
+    b1 = {"messages": [{"role": "user", "content": "turn one"}], "system": "sys"}
+    b2 = body
+    assert cache_key_hash(normalize_for_hash(b1, model="m", pool="p", surface="s")) != cache_key_hash(
+        normalize_for_hash(b2, model="m", pool="p", surface="s")
+    )
+    assert system_fingerprint(b1) == system_fingerprint(b2)
 
 
 class _FakeEmbedTransport(httpx.BaseTransport):
@@ -364,4 +391,77 @@ def test_semantic_skips_different_sampling(tmp_path: Path):
     }
     cache.set(body1, model="mock-cheap", pool="cheap", surface="chat", response=resp)
     hit = cache.get(body2, model="mock-cheap", pool="cheap", surface="chat")
+    assert hit is None
+
+def test_semantic_last_user_hits_across_growing_history(tmp_path: Path):
+    """Claude Code shape: same system/tools, growing messages — last_user can semantic-hit."""
+    shared = [0.8, 0.2, 0.1]
+    # Embed text under last_user scope
+    embed1 = "system: agent-sys\nuser: explain caching"
+    embed2 = "system: agent-sys\nuser: explain caching please"  # paraphrase, history grown
+    transport = _FakeEmbedTransport({embed1: shared, embed2: shared})
+    client = httpx.Client(transport=transport)
+    cache = ResponseCache(
+        _semantic_cfg(tmp_path, semantic_scope="last_user"),
+        http_client=client,
+    )
+    tools = [{"name": "Bash", "description": "run", "input_schema": {"type": "object"}}]
+    body1 = {
+        "system": "agent-sys",
+        "messages": [{"role": "user", "content": "explain caching"}],
+        "max_tokens": 100,
+        "tools": tools,
+    }
+    body2 = {
+        "system": "agent-sys",
+        "messages": [
+            {"role": "user", "content": "explain caching"},
+            {"role": "assistant", "content": "Cache stores answers."},
+            {"role": "user", "content": "explain caching please"},
+        ],
+        "max_tokens": 100,
+        "tools": tools,
+    }
+    resp = {
+        "id": "msg-1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "Cache stores answers."}],
+        "usage": {"input_tokens": 40, "output_tokens": 10},
+    }
+    cache.set(body1, model="ollama-cheap", pool="cheap", surface="anthropic.messages", response=resp)
+    # Exact must miss (history differs)
+    from edge.cache import cache_key_hash, normalize_for_hash
+
+    assert cache_key_hash(normalize_for_hash(body1, model="ollama-cheap", pool="cheap", surface="anthropic.messages")) != cache_key_hash(
+        normalize_for_hash(body2, model="ollama-cheap", pool="cheap", surface="anthropic.messages")
+    )
+    hit = cache.get(body2, model="ollama-cheap", pool="cheap", surface="anthropic.messages")
+    assert hit is not None
+    assert hit.kind == "semantic"
+    assert hit.body["id"] == "msg-1"
+
+
+def test_semantic_last_user_rejects_different_system(tmp_path: Path):
+    shared = [1.0, 0.0, 0.0]
+    transport = _FakeEmbedTransport(
+        {
+            "system: sys-a\nuser: same question": shared,
+            "system: sys-b\nuser: same question": shared,
+        }
+    )
+    client = httpx.Client(transport=transport)
+    cache = ResponseCache(
+        _semantic_cfg(tmp_path, semantic_scope="last_user"),
+        http_client=client,
+    )
+    body1 = {"system": "sys-a", "messages": [{"role": "user", "content": "same question"}]}
+    body2 = {"system": "sys-b", "messages": [{"role": "user", "content": "same question"}]}
+    resp = {
+        "id": "a",
+        "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    cache.set(body1, model="m", pool="cheap", surface="chat", response=resp)
+    hit = cache.get(body2, model="m", pool="cheap", surface="chat")
     assert hit is None

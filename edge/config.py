@@ -89,6 +89,9 @@ class CacheConfig(BaseModel):
     embedding_model: str | None = None  # e.g. nomic-embed-text
     embedding_api_base: str | None = None  # default: cheap pool api_base, else 127.0.0.1:11434
     similarity_threshold: float = 0.92
+    # full = embed all turns (legacy); last_user = system(+trunc) + last user only
+    # Exact hash always uses the full request. last_user helps Claude Code multi-turn.
+    semantic_scope: str = "full"  # full | last_user
 
 
 class GatewayConfig(BaseModel):
