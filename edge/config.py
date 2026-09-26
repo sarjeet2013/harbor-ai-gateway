@@ -12,6 +12,13 @@ class RouterConfig(BaseModel):
     strategy: str = "heuristic_cost_first"
     expensive_keywords: list[str] = Field(default_factory=list)
     expensive_min_chars: int = 2000
+    # Phase-1 task-class routing within the cheap pool (heuristic, not LLM judge)
+    coder_keywords: list[str] = Field(default_factory=list)
+    reason_keywords: list[str] = Field(default_factory=list)
+    # Alias names looked up in models.cheap (must match entry `name`)
+    default_cheap_model: str = "ollama-cheap"
+    coder_model: str = "ollama-coder"
+    reason_model: str = "ollama-reason"
 
 
 class ModelSpec(BaseModel):

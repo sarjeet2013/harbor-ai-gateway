@@ -31,6 +31,12 @@ router:
     - "analyze the entire"
     - "write a detailed"
   expensive_min_chars: 2000
+  # Task-class aliases unused in mock (single mock-cheap); lists kept for schema parity
+  default_cheap_model: mock-cheap
+  coder_model: mock-cheap
+  reason_model: mock-cheap
+  coder_keywords: []
+  reason_keywords: []
 
 # Response cache (exact for mock; semantic needs Ollama embeddings — see docs/features/cache.md)
 cache:

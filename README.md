@@ -183,7 +183,7 @@ curl -s http://127.0.0.1:4000/v1/responses \
 
 - **Day budget** (`daily_budget_usd`): tracked in memory and persisted to `data/budget.json`.
 - **`on_budget_exceeded`**: `force_cheap` (default) or `reject` (HTTP 429).
-- **Heuristic router**: cheap by default; expensive if prompt matches `router.expensive_keywords` or exceeds `expensive_min_chars`.
+- **Heuristic router**: cheap by default; expensive if prompt matches `router.expensive_keywords` or exceeds `expensive_min_chars`; within cheap, phase-1 task-class keywords pick `ollama-coder` / `ollama-reason` / `ollama-cheap` (see [docs/features/routing.md](docs/features/routing.md)). Client Harbor alias wins when `model` matches a configured name.
 - **Ledger**: JSONL at `logs/ledger.jsonl` — each line has `model`, `reason`, `pool`, `tokens`, `cost_usd`, `status`, plus `cache_hit` / `cache_kind` / `tokens_saved*`.
 
 

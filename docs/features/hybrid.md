@@ -6,8 +6,13 @@
 
 | Pool | Alias | LiteLLM model | Needs key? |
 | --- | --- | --- | --- |
-| cheap | `ollama-cheap` | `ollama_chat/qwen3:8b` + `api_base` Mini Ollama (`http://192.168.4.31:11434`) | No |
+| cheap | `ollama-cheap` (default chat) | `ollama_chat/qwen3:8b` + Mini `api_base` (`think: false`) | No |
+| cheap | `ollama-chat` | same 8b (duplicate chat alias) | No |
+| cheap | `ollama-coder` | `ollama_chat/qwen2.5-coder:14b` @ Mini | No |
+| cheap | `ollama-reason` | `ollama_chat/deepseek-r1:14b` @ Mini | No |
 | expensive | `openai-expensive` | `openai/gpt-4o-mini` | Yes — `OPENAI_API_KEY` |
+
+Task-class routing within cheap (and Claude Code tips): [routing.md](routing.md). **VRAM:** avoid loading two 14Bs at once.
 
 Default expensive id is `openai/gpt-4o-mini` (strong, lower cost than `gpt-4o`). Bump via `litellm_model: openai/gpt-4o` in `config/gateway.yaml`. See [LiteLLM OpenAI](https://docs.litellm.ai/docs/providers/openai).
 

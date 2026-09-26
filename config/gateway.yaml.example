@@ -23,8 +23,24 @@ cost_estimates_usd:
 models:
   cheap:
     - name: ollama-cheap
-      # Default: Mac Mini Ollama on LAN. For local-only: 127.0.0.1 + any pulled model.
+      # Mac Mini Ollama on LAN (qwen3:8b). Default chat alias — keep for Claude Code / Cursor.
       litellm_model: ollama_chat/qwen3:8b
+      api_base: http://192.168.4.31:11434
+      # Disable qwen3 "thinking" so Claude Code does not get empty/slow replies
+      extra_litellm_params:
+        think: false
+    - name: ollama-chat
+      # Duplicate chat alias (same 8b); optional explicit name for clients
+      litellm_model: ollama_chat/qwen3:8b
+      api_base: http://192.168.4.31:11434
+      extra_litellm_params:
+        think: false
+    - name: ollama-coder
+      litellm_model: ollama_chat/qwen2.5-coder:14b
+      api_base: http://192.168.4.31:11434
+    - name: ollama-reason
+      # deepseek-r1:14b. Alt: qwen3:14b — do not load two 14Bs at once (VRAM).
+      litellm_model: ollama_chat/deepseek-r1:14b
       api_base: http://192.168.4.31:11434
   expensive:
     # Hybrid: OpenAI. Default gpt-4o-mini (strong + cheaper than gpt-4o).
@@ -56,6 +72,30 @@ router:
     - "write a detailed"
   # Prefer expensive if estimated prompt chars exceed this
   expensive_min_chars: 2000
+  # Phase-1 task-class within cheap (after expensive check; client alias still wins)
+  default_cheap_model: ollama-cheap
+  coder_model: ollama-coder
+  reason_model: ollama-reason
+  coder_keywords:
+    - "write a function"
+    - "implement"
+    - "fix the bug"
+    - "fix a bug"
+    - "unit test"
+    - "code review"
+    - "compile error"
+    - "stack trace"
+    - "type error"
+    - "pull request"
+  reason_keywords:
+    - "step by step"
+    - "reason about"
+    - "prove that"
+    - "chain of thought"
+    - "logic puzzle"
+    - "math problem"
+    - "think through"
+    - "derive"
 
 # Response cache: exact + semantic (exact-first). See docs/features/cache.md
 cache:
