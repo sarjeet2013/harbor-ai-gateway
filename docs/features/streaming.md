@@ -1,12 +1,12 @@
 # Feature: Streaming
 
-**Status:** **Shipped (v1 chat + Anthropic messages).** `POST /v1/chat/completions` with `"stream": true` returns OpenAI-style SSE; `POST /v1/messages` with `"stream": true` returns Anthropic Messages SSE (via chat upstream + remap) (`text/event-stream`) via passthrough from LiteLLM/Ollama, or mock SSE when `upstream_mode: mock`. OpenAI Responses streaming is **not** shipped — `/v1/responses` returns **HTTP 501** if `stream: true`. Anthropic Messages streaming is shipped (Claude Code).
+**Status:** **Shipped (v1 chat + Anthropic messages + OpenAI Responses).** `POST /v1/chat/completions` with `"stream": true` returns OpenAI-style SSE; `POST /v1/messages` with `"stream": true` returns Anthropic Messages SSE (via chat upstream + remap); `POST /v1/responses` with `"stream": true` returns OpenAI Responses SSE (via chat upstream + remap) (`text/event-stream`) via passthrough/remap from LiteLLM/Ollama, or mock SSE when `upstream_mode: mock`.
 
-`stream: true` uses the **same response cache** as non-stream (exact + semantic) — see [cache.md](cache.md). On a **hit**, the edge synthesizes OpenAI or Anthropic SSE from the cached complete JSON body (no upstream). On a **miss**, upstream SSE is passed through to the client while the edge accumulates bytes; a successful complete stream is stored for later hits. After a stream completes successfully, the edge writes **one** ledger line and calls `budget.record` once on misses (usage parsed from the final SSE chunk when present; otherwise tokens empty / cost from estimates). Pure cache hits do not charge budget. Mid-stream failure → ledger `status` reflects the error and **nothing is stored**.
+`stream: true` uses the **same response cache** as non-stream (exact + semantic) — see [cache.md](cache.md). On a **hit**, the edge synthesizes OpenAI chat, Anthropic, or Responses SSE from the cached complete JSON body (no upstream). On a **miss**, upstream SSE is passed through (chat) or remapped (messages / responses) to the client while the edge accumulates bytes; a successful complete stream is stored for later hits. After a stream completes successfully, the edge writes **one** ledger line and calls `budget.record` once on misses (usage parsed from the final SSE chunk / `response.completed` when present; otherwise tokens empty / cost from estimates). Pure cache hits do not charge budget. Mid-stream failure → ledger `status` reflects the error and **nothing is stored**.
 
 ## What clients need
 
-OpenAI-style SSE on `POST /v1/chat/completions` and Anthropic Messages SSE on `POST /v1/messages` (Claude Code). OpenAI Responses streaming is a follow-on.
+OpenAI-style SSE on `POST /v1/chat/completions`, Anthropic Messages SSE on `POST /v1/messages` (Claude Code), and OpenAI Responses SSE on `POST /v1/responses` (Codex).
 
 ## What is needed (implementation checklist)
 
@@ -24,7 +24,7 @@ OpenAI-style SSE on `POST /v1/chat/completions` and Anthropic Messages SSE on `P
 ### Later — other surfaces
 
 7. **`/v1/messages` streaming** — **done** (chat upstream + Anthropic SSE remap; collect-then-remap v1).
-8. **`/v1/responses` streaming** — same idea for the Responses wire format. Today: **501** if `stream: true`.
+8. **`/v1/responses` streaming** — **done** (chat upstream + Responses SSE remap; collect-then-remap v1).
 9. **`/cursor/*`** — only if Cursor attach still needs edge-level SSE beyond LiteLLM’s own proxy.
 
 ## Ship order
@@ -32,12 +32,12 @@ OpenAI-style SSE on `POST /v1/chat/completions` and Anthropic Messages SSE on `P
 1. Chat stream passthrough + mock SSE — **done**
 2. Ledger / budget after stream completes — **done**
 3. Smoke — **done**
-4. Messages / Responses SSE only when a real client is blocked
+4. Messages / Responses SSE — **done** (collect-then-remap)
 
 ## Limits
 
 - **Anthropic messages miss path** still **collect-then-remap** OpenAI chat SSE before emitting Anthropic events (`openai_chat_sse_to_anthropic_sse`). Cache **store** and **hit replay** work; miss TTFB for `/v1/messages` remains buffered until the upstream chat stream finishes. Token-at-a-time Anthropic remap is a follow-on.
-- OpenAI `/v1/responses` streaming remains **501**.
+- **OpenAI Responses miss path** likewise **collect-then-remap** (`openai_chat_sse_to_responses_sse`). Emits `response.created` → `response.output_text.delta`* → `response.completed` (plus item/part lifecycle events). Cache store/hit replay work; miss TTFB for `/v1/responses` is buffered until the upstream chat stream finishes. Token-at-a-time Responses remap is a follow-on.
 
 ## Out of scope for this note
 

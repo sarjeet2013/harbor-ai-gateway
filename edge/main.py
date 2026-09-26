@@ -28,9 +28,14 @@ from .translate import (
     iter_anthropic_sse_from_cached_chat,
     iter_anthropic_sse_from_cached_message,
     iter_openai_sse_from_cached_chat,
+    iter_responses_sse_from_cached_chat,
+    iter_responses_sse_from_cached_response,
     openai_chat_sse_to_anthropic_sse,
     openai_chat_sse_to_anthropic_sse_sync,
     openai_chat_sse_to_completion,
+    openai_chat_sse_to_responses_sse,
+    openai_chat_sse_to_responses_sse_sync,
+    responses_sse_to_response,
     responses_to_chat,
 )
 from .ledger import Ledger
@@ -39,7 +44,8 @@ from .admin import mount_admin
 # Surfaces that support streaming in v1
 _CHAT_SURFACE = "openai.chat.completions"
 _MESSAGES_SURFACE = "anthropic.messages"
-_STREAM_SURFACES = {_CHAT_SURFACE, _MESSAGES_SURFACE}
+_RESPONSES_SURFACE = "openai.responses"
+_STREAM_SURFACES = {_CHAT_SURFACE, _MESSAGES_SURFACE, _RESPONSES_SURFACE}
 
 
 def _parse_usage_from_sse(raw: bytes) -> dict[str, Any]:
@@ -59,8 +65,13 @@ def _parse_usage_from_sse(raw: bytes) -> dict[str, Any]:
             obj = json.loads(payload)
         except json.JSONDecodeError:
             continue
-        if isinstance(obj, dict) and isinstance(obj.get("usage"), dict):
+        if not isinstance(obj, dict):
+            continue
+        if isinstance(obj.get("usage"), dict):
             usage = obj["usage"]
+        resp = obj.get("response")
+        if isinstance(resp, dict) and isinstance(resp.get("usage"), dict):
+            usage = resp["usage"]
     return usage
 
 
@@ -129,7 +140,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         bypass: bool,
         translate: str | None = None,
     ) -> Response:
-        """SSE for chat (passthrough) and Anthropic messages (chat upstream + remap).
+        """SSE for chat (passthrough), Anthropic messages, and OpenAI Responses (chat upstream + remap).
 
         On successful complete streams, tee-store the reconstructed JSON body into
         the response cache (same key space as non-stream). Mid-stream errors and
@@ -169,6 +180,8 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                             stored = openai_chat_sse_to_completion(raw)
                         elif surface == _MESSAGES_SURFACE:
                             stored = anthropic_sse_to_message(raw)
+                        elif surface == _RESPONSES_SURFACE:
+                            stored = responses_sse_to_response(raw)
                         if stored is not None:
                             cache.set(
                                 body,
@@ -196,18 +209,26 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                     }
                 )
 
-        # Anthropic messages stream: translate to chat, then remap SSE to Anthropic events.
+        # Anthropic / Responses stream: translate to chat, then remap SSE.
         upstream_path = path
         upstream_body = body
         if translate == "anthropic":
             upstream_path = "/v1/chat/completions"
             upstream_body = anthropic_to_chat(body, decision.model)
             upstream_body["stream"] = True
+        elif translate == "responses":
+            upstream_path = "/v1/chat/completions"
+            upstream_body = responses_to_chat(body, decision.model)
+            upstream_body["stream"] = True
 
         if config.upstream_mode == "mock":
             mock_iter = mock_chat_completion_stream(upstream_body, decision.model)
             if translate == "anthropic":
                 mock_iter = openai_chat_sse_to_anthropic_sse_sync(
+                    mock_iter, model=decision.model
+                )
+            elif translate == "responses":
+                mock_iter = openai_chat_sse_to_responses_sse_sync(
                     mock_iter, model=decision.model
                 )
             return StreamingResponse(
@@ -251,6 +272,8 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         out_iter: AsyncIterator[bytes] | Iterator[bytes] = aiter
         if translate == "anthropic":
             out_iter = openai_chat_sse_to_anthropic_sse(aiter, model=decision.model)
+        elif translate == "responses":
+            out_iter = openai_chat_sse_to_responses_sse(aiter, model=decision.model)
         return StreamingResponse(_tee_and_record(out_iter), media_type="text/event-stream")
 
     async def _handle(
@@ -300,16 +323,16 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 status_code=429,
             )
 
-        # v1 streaming: chat + Anthropic messages. Responses still 501.
+        # v1 streaming: chat + Anthropic messages + OpenAI Responses.
         if body.get("stream") is True and surface not in _STREAM_SURFACES:
             return JSONResponse(
                 {
                     "error": {
                         "type": "streaming_not_supported",
                         "message": (
-                            "stream:true is supported on POST /v1/chat/completions and "
-                            "POST /v1/messages in Harbor v1. OpenAI Responses streaming "
-                            "is planned. Omit stream or use chat/messages."
+                            "stream:true is supported on POST /v1/chat/completions, "
+                            "POST /v1/messages, and POST /v1/responses. "
+                            "Omit stream or use one of those surfaces."
                         ),
                         "surface": surface,
                     }
@@ -380,6 +403,21 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                             )
                         return StreamingResponse(
                             iter_anthropic_sse_from_cached_message(cached),
+                            media_type="text/event-stream",
+                        )
+                    if surface == _RESPONSES_SURFACE:
+                        cached = hit.body
+                        if cached.get("object") == "chat.completion" or (
+                            isinstance(cached.get("choices"), list)
+                        ):
+                            return StreamingResponse(
+                                iter_responses_sse_from_cached_chat(
+                                    cached, model=decision.model
+                                ),
+                                media_type="text/event-stream",
+                            )
+                        return StreamingResponse(
+                            iter_responses_sse_from_cached_response(cached),
                             media_type="text/event-stream",
                         )
                 return JSONResponse(hit.body, status_code=200)

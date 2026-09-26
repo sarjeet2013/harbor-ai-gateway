@@ -15,11 +15,10 @@ Works anywhere you have **Python 3**, optional **Ollama** (local or remote), and
 | Exact + semantic response cache (incl. stream hit/miss) | **Shipped** | [docs/features/cache.md](docs/features/cache.md) |
 | Heuristic + LLM judge routing (`judge_then_heuristic`) | **Shipped** | [docs/features/routing.md](docs/features/routing.md) |
 | Hybrid pools (Ollama cheap + OpenAI expensive) | **Shipped** | [docs/features/hybrid.md](docs/features/hybrid.md) |
-| Streaming SSE (chat + Anthropic messages) | **Shipped** | [docs/features/streaming.md](docs/features/streaming.md) |
+| Streaming SSE (chat + Anthropic messages + Responses) | **Shipped** | [docs/features/streaming.md](docs/features/streaming.md) |
 | Cursor attach (`/cursor` + HTTPS tunnel) | **Shipped** | [docs/features/cursor.md](docs/features/cursor.md) |
 | Mini Admin UI (`/admin`) | **Shipped** | [docs/features/admin-ui.md](docs/features/admin-ui.md) |
 | Claude Code / Codex surfaces (`/v1/messages`, `/v1/responses`) | **Shipped** | [architecture](docs/architecture.md) |
-| OpenAI `/v1/responses` streaming | Planned (501 today) | [streaming](docs/features/streaming.md) |
 
 ## What we own vs wrap
 
@@ -235,9 +234,9 @@ docker compose up --build -d
 
 ## Scope
 
-**In:** wrap LiteLLM; judge + heuristic routing; day USD budget; exact + semantic cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode; chat + Anthropic SSE.
+**In:** wrap LiteLLM; judge + heuristic routing; day USD budget; exact + semantic cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode; chat + Anthropic + Responses SSE.
 
-**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned:** OpenAI Responses SSE (still 501).
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. Streaming (chat + Anthropic messages + OpenAI Responses SSE) is shipped.
 
 ## Packaging
 

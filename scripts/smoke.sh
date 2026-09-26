@@ -179,6 +179,24 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+echo "== OpenAI /v1/responses stream =="
+RSCODE=$(curl -s -o /tmp/gw_resp_stream.txt -w "%{http_code}" \
+  -X POST "$BASE/v1/responses" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"$CHEAP_MODEL\",\"stream\":true,\"input\":\"hello from smoke responses stream\"}" || echo "000")
+if [[ "$RSCODE" =~ ^2 ]] && grep -q "event: response.created" /tmp/gw_resp_stream.txt && grep -q "event: response.completed" /tmp/gw_resp_stream.txt; then
+  echo "PASS  POST /v1/responses stream (HTTP $RSCODE, response.created + response.completed)"
+  PASS=$((PASS + 1))
+elif [[ "$RSCODE" =~ ^2 ]] && grep -q "response.output_text.delta" /tmp/gw_resp_stream.txt; then
+  echo "PASS  POST /v1/responses stream (HTTP $RSCODE, output_text.delta)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL  POST /v1/responses stream — HTTP $RSCODE or missing Responses SSE events"
+  echo "      body: $(head -c 500 /tmp/gw_resp_stream.txt 2>/dev/null || true)"
+  FAIL=$((FAIL + 1))
+fi
+
+
 echo "Results: $PASS passed, $FAIL failed"
 if [[ "$FAIL" -gt 0 ]]; then
   exit 1

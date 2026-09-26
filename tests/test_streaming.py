@@ -332,7 +332,7 @@ def test_messages_stream_anthropic_sse(tmp_path: Path):
     assert row["status"] == "ok"
 
 
-def test_responses_stream_returns_501(tmp_path: Path):
+def test_responses_stream_sse(tmp_path: Path):
     cfg = _mock_cfg(tmp_path)
     app = create_app(cfg)
     client = TestClient(app)
@@ -341,10 +341,82 @@ def test_responses_stream_returns_501(tmp_path: Path):
         json={
             "model": "mock-cheap",
             "stream": True,
-            "input": "no stream yet",
+            "input": "hello responses stream",
         },
     )
-    assert r.status_code == 501
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers.get("content-type", "")
+    body = r.text
+    assert "event: response.created" in body
+    assert "event: response.output_text.delta" in body
+    assert "event: response.completed" in body
+    assert "hello responses stream" in body or "output_text" in body
+    lines = (tmp_path / "ledger.jsonl").read_text().strip().splitlines()
+    assert lines
+    row = json.loads(lines[-1])
+    assert row["surface"] == "openai.responses"
+    assert row.get("stream") is True
+    assert row["status"] == "ok"
+    assert row["cache_hit"] is False
+
+
+def test_responses_stream_exact_hit(tmp_path: Path):
+    """Non-stream /v1/responses store → stream hit returns Responses SSE."""
+    cfg = _mock_cfg(tmp_path)
+    app = create_app(cfg)
+    client = TestClient(app)
+    seed = {
+        "model": "mock-cheap",
+        "input": "responses stream cache seed",
+    }
+    r0 = client.post("/v1/responses", json=seed)
+    assert r0.status_code == 200
+    seeded_text = r0.json()["output"][0]["content"][0]["text"]
+
+    r1 = client.post("/v1/responses", json={**seed, "stream": True})
+    assert r1.status_code == 200
+    assert "text/event-stream" in r1.headers.get("content-type", "")
+    body = r1.text
+    assert "event: response.created" in body
+    assert "event: response.completed" in body
+    assert "response.output_text.delta" in body
+    assert "responses stream cache seed" in body or seeded_text[:30] in body
+    hit = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert hit["cache_hit"] is True
+    assert hit["cache_kind"] == "exact"
+    assert hit["surface"] == "openai.responses"
+    assert hit.get("stream") is True
+
+
+def test_responses_stream_miss_stores_for_nonstream(tmp_path: Path):
+    cfg = _mock_cfg(tmp_path)
+    app = create_app(cfg)
+    client = TestClient(app)
+    payload = {
+        "model": "mock-cheap",
+        "stream": True,
+        "input": "responses stream miss then hit",
+    }
+    r0 = client.post("/v1/responses", json=payload)
+    assert r0.status_code == 200
+    _ = r0.text
+    miss = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert miss["cache_hit"] is False
+    assert miss.get("stream") is True
+
+    r1 = client.post(
+        "/v1/responses",
+        json={
+            "model": "mock-cheap",
+            "input": "responses stream miss then hit",
+        },
+    )
+    assert r1.status_code == 200
+    assert r1.json()["object"] == "response"
+    assert r1.json()["status"] == "completed"
+    hit = json.loads((tmp_path / "ledger.jsonl").read_text().strip().splitlines()[-1])
+    assert hit["cache_hit"] is True
+    assert hit["cache_kind"] == "exact"
 
 
 def test_messages_stream_exact_hit(tmp_path: Path):

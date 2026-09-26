@@ -3,6 +3,8 @@ from edge.translate import (
     anthropic_to_chat,
     chat_to_anthropic,
     chat_to_responses,
+    openai_chat_chunks_to_responses_sse,
+    responses_sse_to_response,
     responses_to_chat,
 )
 
@@ -65,3 +67,36 @@ def test_anthropic_clamps_max_tokens():
         "m",
     )
     assert chat_req["max_tokens"] == 16384
+
+
+def test_responses_sse_roundtrip_from_chat_chunks():
+    chunks = [
+        {
+            "id": "chatcmpl-z",
+            "object": "chat.completion.chunk",
+            "created": 10,
+            "model": "m",
+            "choices": [
+                {"index": 0, "delta": {"role": "assistant", "content": "hi"}, "finish_reason": None}
+            ],
+        },
+        {
+            "id": "chatcmpl-z",
+            "object": "chat.completion.chunk",
+            "created": 10,
+            "model": "m",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+        },
+    ]
+    events = openai_chat_chunks_to_responses_sse(chunks, model="m")
+    raw = b"".join(events)
+    assert b"event: response.created" in raw
+    assert b"event: response.completed" in raw
+    assert b"response.output_text.delta" in raw
+    rebuilt = responses_sse_to_response(raw)
+    assert rebuilt is not None
+    assert rebuilt["object"] == "response"
+    assert rebuilt["status"] == "completed"
+    assert rebuilt["output"][0]["content"][0]["text"] == "hi"
+    assert rebuilt["usage"]["input_tokens"] == 2

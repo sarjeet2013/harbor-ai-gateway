@@ -653,3 +653,360 @@ def iter_anthropic_sse_from_cached_message(body: dict[str, Any]) -> Iterator[byt
 def iter_anthropic_sse_from_cached_chat(body: dict[str, Any], *, model: str) -> Iterator[bytes]:
     """Synthesize Anthropic SSE from a cached OpenAI chat.completion body."""
     yield from iter_anthropic_sse_from_cached_message(chat_to_anthropic(body, model))
+
+
+def format_responses_sse(event: str, data: dict[str, Any]) -> bytes:
+    """One OpenAI Responses SSE event (event: + data: + blank line)."""
+    payload = dict(data)
+    payload.setdefault("type", event)
+    return (
+        f"event: {event}\n"
+        f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    ).encode("utf-8")
+
+
+def _responses_usage_from_chat_objs(chat_objs: list[dict[str, Any]]) -> dict[str, int]:
+    input_tokens = 0
+    output_tokens = 0
+    for obj in chat_objs:
+        usage = obj.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        input_tokens = int(
+            usage.get("prompt_tokens")
+            or usage.get("input_tokens")
+            or input_tokens
+            or 0
+        )
+        output_tokens = int(
+            usage.get("completion_tokens")
+            or usage.get("output_tokens")
+            or output_tokens
+            or 0
+        )
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+
+
+def openai_chat_chunks_to_responses_sse(
+    chat_objs: list[dict[str, Any]], *, model: str
+) -> list[bytes]:
+    """Build OpenAI Responses SSE events from OpenAI chat chunk objects."""
+    rid = f"resp_{uuid.uuid4().hex[:12]}"
+    msg_id = f"msg_{uuid.uuid4().hex[:8]}"
+    created_at = int(time.time())
+    text_parts: list[str] = []
+    out_model = model
+
+    for obj in chat_objs:
+        if obj.get("model"):
+            out_model = str(obj["model"])
+        if obj.get("created") is not None:
+            try:
+                created_at = int(obj["created"])
+            except (TypeError, ValueError):
+                pass
+        choices = obj.get("choices") or []
+        if not choices:
+            continue
+        ch0 = choices[0] or {}
+        delta = ch0.get("delta") or {}
+        piece = delta.get("content")
+        if piece:
+            text_parts.append(str(piece))
+        msg = ch0.get("message") or {}
+        if isinstance(msg, dict) and msg.get("content") and not text_parts:
+            text_parts.append(_content_to_text(msg.get("content")))
+
+    full = "".join(text_parts)
+    usage = _responses_usage_from_chat_objs(chat_objs)
+    if usage["output_tokens"] == 0 and full:
+        usage["output_tokens"] = max(1, len(full) // 4)
+        usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+
+    partial = {
+        "id": rid,
+        "object": "response",
+        "created_at": created_at,
+        "status": "in_progress",
+        "model": out_model,
+        "output": [],
+        "usage": None,
+    }
+    completed_item = {
+        "id": msg_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": full}],
+        "status": "completed",
+    }
+    completed = {
+        "id": rid,
+        "object": "response",
+        "created_at": created_at,
+        "status": "completed",
+        "model": out_model,
+        "output": [completed_item],
+        "usage": usage,
+    }
+
+    seq = 0
+
+    def _next_seq() -> int:
+        nonlocal seq
+        seq += 1
+        return seq
+
+    events: list[bytes] = [
+        format_responses_sse(
+            "response.created",
+            {"type": "response.created", "response": partial, "sequence_number": _next_seq()},
+        ),
+        format_responses_sse(
+            "response.output_item.added",
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": msg_id,
+                    "status": "in_progress",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                },
+                "sequence_number": _next_seq(),
+            },
+        ),
+        format_responses_sse(
+            "response.content_part.added",
+            {
+                "type": "response.content_part.added",
+                "item_id": msg_id,
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": "", "annotations": []},
+                "sequence_number": _next_seq(),
+            },
+        ),
+    ]
+
+    step = 48
+    if not full:
+        events.append(
+            format_responses_sse(
+                "response.output_text.delta",
+                {
+                    "type": "response.output_text.delta",
+                    "item_id": msg_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": "",
+                    "sequence_number": _next_seq(),
+                    "logprobs": [],
+                },
+            )
+        )
+    else:
+        for i in range(0, len(full), step):
+            piece = full[i : i + step]
+            events.append(
+                format_responses_sse(
+                    "response.output_text.delta",
+                    {
+                        "type": "response.output_text.delta",
+                        "item_id": msg_id,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": piece,
+                        "sequence_number": _next_seq(),
+                        "logprobs": [],
+                    },
+                )
+            )
+
+    events.append(
+        format_responses_sse(
+            "response.output_text.done",
+            {
+                "type": "response.output_text.done",
+                "item_id": msg_id,
+                "output_index": 0,
+                "content_index": 0,
+                "text": full,
+                "sequence_number": _next_seq(),
+                "logprobs": [],
+            },
+        )
+    )
+    events.append(
+        format_responses_sse(
+            "response.content_part.done",
+            {
+                "type": "response.content_part.done",
+                "item_id": msg_id,
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": full, "annotations": []},
+                "sequence_number": _next_seq(),
+            },
+        )
+    )
+    events.append(
+        format_responses_sse(
+            "response.output_item.done",
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": completed_item,
+                "sequence_number": _next_seq(),
+            },
+        )
+    )
+    events.append(
+        format_responses_sse(
+            "response.completed",
+            {
+                "type": "response.completed",
+                "response": completed,
+                "sequence_number": _next_seq(),
+            },
+        )
+    )
+    return events
+
+
+def openai_chat_sse_to_responses_sse_sync(
+    chunks: Iterator[bytes], *, model: str
+) -> Iterator[bytes]:
+    """Sync: collect OpenAI chat SSE, emit OpenAI Responses SSE."""
+    collected = bytearray()
+    for chunk in chunks:
+        collected.extend(chunk)
+    yield from openai_chat_chunks_to_responses_sse(
+        _parse_openai_chat_sse_objects(bytes(collected)), model=model
+    )
+
+
+async def openai_chat_sse_to_responses_sse(
+    chunks: AsyncIterator[bytes], *, model: str
+) -> AsyncIterator[bytes]:
+    """Async: collect OpenAI chat SSE, emit OpenAI Responses SSE.
+
+    Collects the upstream stream then remaps (same collect-then-remap approach
+    as Anthropic messages). Token-at-a-time Responses remap can follow.
+    """
+    collected = bytearray()
+    async for chunk in chunks:
+        collected.extend(chunk)
+    for event in openai_chat_chunks_to_responses_sse(
+        _parse_openai_chat_sse_objects(bytes(collected)), model=model
+    ):
+        yield event
+
+
+def _parse_responses_sse_events(raw: bytes) -> list[tuple[str, dict[str, Any]]]:
+    """Parse Responses ``event:`` / ``data:`` SSE into (event_name, data_dict)."""
+    events: list[tuple[str, dict[str, Any]]] = []
+    text = raw.decode("utf-8", errors="replace")
+    event_name = ""
+    for line in text.splitlines():
+        if line.startswith("event:"):
+            event_name = line[6:].strip()
+            continue
+        if line.startswith("data:"):
+            payload = line[5:].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                obj = json.loads(payload)
+            except json.JSONDecodeError:
+                event_name = ""
+                continue
+            if isinstance(obj, dict):
+                name = event_name or str(obj.get("type") or "")
+                events.append((name, obj))
+            event_name = ""
+            continue
+        if line.strip() == "":
+            event_name = ""
+    return events
+
+
+def responses_sse_to_response(raw: bytes) -> dict[str, Any] | None:
+    """Rebuild an OpenAI Responses JSON body from Responses SSE bytes.
+
+    Returns None if ``response.completed`` is missing (incomplete stream).
+    """
+    events = _parse_responses_sse_events(raw)
+    completed: dict[str, Any] | None = None
+    for name, data in events:
+        if name == "response.completed":
+            resp = data.get("response")
+            if isinstance(resp, dict):
+                completed = resp
+    if completed is None:
+        return None
+    # Ensure minimal shape for cache / non-stream consumers
+    if "object" not in completed:
+        completed["object"] = "response"
+    if "status" not in completed:
+        completed["status"] = "completed"
+    return completed
+
+
+def iter_responses_sse_from_cached_response(body: dict[str, Any]) -> Iterator[bytes]:
+    """Synthesize OpenAI Responses SSE from a cached Responses body."""
+    model = str(body.get("model") or "")
+    created_at = int(body.get("created_at") or body.get("created") or time.time())
+    text = ""
+    output = body.get("output")
+    if isinstance(output, list) and output:
+        item0 = output[0] or {}
+        if isinstance(item0, dict):
+            text = _content_to_text(item0.get("content"))
+    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+    input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+    output_tokens = int(
+        usage.get("output_tokens")
+        or usage.get("completion_tokens")
+        or (max(1, len(text) // 4) if text else 0)
+    )
+    total_tokens = int(usage.get("total_tokens") or (input_tokens + output_tokens))
+
+    chat_like = [
+        {
+            "id": f"chatcmpl_{uuid.uuid4().hex[:8]}",
+            "object": "chat.completion.chunk",
+            "created": created_at,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": text},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": f"chatcmpl_{uuid.uuid4().hex[:8]}",
+            "object": "chat.completion.chunk",
+            "created": created_at,
+            "model": model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            },
+        },
+    ]
+    yield from openai_chat_chunks_to_responses_sse(chat_like, model=model)
+
+
+
+def iter_responses_sse_from_cached_chat(body: dict[str, Any], *, model: str) -> Iterator[bytes]:
+    """Synthesize Responses SSE from a cached OpenAI chat.completion body."""
+    yield from iter_responses_sse_from_cached_response(chat_to_responses(body, model))

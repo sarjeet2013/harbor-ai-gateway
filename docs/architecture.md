@@ -13,7 +13,7 @@ Security: [SECURITY.md](SECURITY.md). Source of truth: `config/gateway.yaml` + `
 7. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
 8. **Upstream** — `upstream_mode: mock` (echo completions, no keys) or `litellm` (CLI-managed proxy on `litellm_host`:`litellm_port`, default `127.0.0.1:4001`).
    Default pools are **hybrid**: Ollama cheap (any reachable `api_base`) + OpenAI expensive — see [features/hybrid.md](features/hybrid.md).
-   Chat + Anthropic **streaming** (`stream: true`) is SSE passthrough (or synthesized SSE on cache hit); OpenAI `/v1/responses` returns 501 for `stream: true`. Stream requests share the response cache with non-stream. See [features/streaming.md](features/streaming.md) and [features/cache.md](features/cache.md).
+   Chat + Anthropic + OpenAI Responses **streaming** (`stream: true`) is SSE passthrough/remap (or synthesized SSE on cache hit). Stream requests share the response cache with non-stream. See [features/streaming.md](features/streaming.md) and [features/cache.md](features/cache.md).
 9. **Config** — local `config/gateway.yaml` (gitignored; copy from `gateway.yaml.example`). LiteLLM YAML is **generated** to `config/.generated_litellm.yaml` (override with `GATEWAY_LITELLM_CONFIG`). Do not hand-edit `config/litellm_config.yaml` (deprecated stub).
 
 ## Surfaces (edge)
@@ -25,7 +25,7 @@ Security: [SECURITY.md](SECURITY.md). Source of truth: `config/gateway.yaml` + `
 | `GET /admin` · `/admin/api/settings` | Mini Admin UI + settings JSON (**shipped** — [features/admin-ui.md](features/admin-ui.md)); mutations localhost-only |
 | `POST /v1/chat/completions` | OpenAI Chat Completions (incl. `stream: true` SSE) |
 | `POST /v1/messages` | Anthropic Messages (Claude Code; incl. `stream: true` SSE); in `litellm` mode edge translates ↔ chat/completions |
-| `POST /v1/responses` | OpenAI Responses (Codex `wire_api=responses`); in `litellm` mode edge translates ↔ chat/completions |
+| `POST /v1/responses` | OpenAI Responses (Codex `wire_api=responses`; incl. `stream: true` SSE); in `litellm` mode edge translates ↔ chat/completions |
 | `/cursor/*` | Harbor chat/models via `_handle`; other paths fall back to LiteLLM `/v1/*` |
 
 ## CLI
@@ -77,7 +77,7 @@ Same path for all clients once traffic hits the edge: clients → edge `:4000` �
 
 - **Packaging / distribution** — Docker/GHCR, pipx, native release binaries; see [features/packaging.md](features/packaging.md). **Admin UI prioritized; packaging revisited later.**
 
-- **Responses streaming** — chat + Anthropic messages SSE (incl. cache hit replay / miss tee-store) ship; OpenAI `/v1/responses` with `stream: true` still returns 501. See [features/streaming.md](features/streaming.md).
+- **Streaming** — chat + Anthropic messages + OpenAI Responses SSE (incl. cache hit replay / miss tee-store). Messages and Responses miss paths collect-then-remap from chat SSE. See [features/streaming.md](features/streaming.md).
 
 ## Shipped recently
 
