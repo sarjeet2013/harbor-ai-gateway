@@ -236,3 +236,7 @@ docker compose up --build -d
 **In:** wrap LiteLLM; judge + heuristic routing; day USD budget; exact + semantic cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode; chat + Anthropic SSE.
 
 **Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **Planned:** OpenAI Responses SSE (still 501).
+
+## Packaging
+
+Distribution roadmap: [docs/features/packaging.md](docs/features/packaging.md).

@@ -9,5 +9,6 @@
 | [features/hybrid.md](features/hybrid.md) | Ollama cheap + OpenAI expensive (**shipped**) |
 | [features/streaming.md](features/streaming.md) | Chat + Anthropic SSE (**shipped**); Responses stream planned |
 | [features/cursor.md](features/cursor.md) | Cursor attach via HTTPS tunnel (**shipped**) |
+| [features/packaging.md](features/packaging.md) | Distribution plan: Docker, pip/pipx, native binaries (**planned**) |
 
 Top-level: [../README.md](../README.md), [../RUN_OLLAMA.md](../RUN_OLLAMA.md).

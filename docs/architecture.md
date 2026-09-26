@@ -73,6 +73,8 @@ Same path for all clients once traffic hits the edge: clients → edge `:4000` �
 
 ## Planned (not yet shipped)
 
+- **Packaging / distribution** — Docker/GHCR, pipx, native release binaries; see [features/packaging.md](features/packaging.md).
+
 - **Responses streaming** — chat + Anthropic messages SSE (incl. cache hit replay / miss tee-store) ship; OpenAI `/v1/responses` with `stream: true` still returns 501. See [features/streaming.md](features/streaming.md).
 
 ## Shipped recently
