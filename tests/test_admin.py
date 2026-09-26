@@ -15,6 +15,7 @@ from edge.admin import (
     apply_settings,
     build_settings_payload,
     env_key_is_set,
+    hostname_from_host_header,
     is_loopback_host,
     require_localhost,
     schedule_edge_restart,
@@ -40,6 +41,19 @@ def test_is_loopback_host():
     assert not is_loopback_host("testclient")
     assert not is_loopback_host(None)
     assert not is_loopback_host("")
+
+
+def test_hostname_from_host_header():
+    assert hostname_from_host_header("127.0.0.1") == "127.0.0.1"
+    assert hostname_from_host_header("127.0.0.1:4000") == "127.0.0.1"
+    assert hostname_from_host_header("localhost") == "localhost"
+    assert hostname_from_host_header("localhost:4000") == "localhost"
+    assert hostname_from_host_header("[::1]") == "::1"
+    assert hostname_from_host_header("[::1]:4000") == "::1"
+    assert hostname_from_host_header("192.168.1.5:4000") == "192.168.1.5"
+    assert hostname_from_host_header(None) is None
+    assert hostname_from_host_header("") is None
+    assert hostname_from_host_header("  ") is None
 
 
 def _cfg(tmp_path: Path) -> GatewayConfig:
@@ -128,6 +142,87 @@ def test_mutate_rejects_non_local(tmp_path: Path):
     )
     assert res.status_code == 403
     assert "localhost" in res.json()["detail"].lower() or "loopback" in res.json()["detail"].lower()
+
+
+def test_mutate_rejects_lan_host_header(tmp_path: Path):
+    """Peer non-loopback + LAN Host → 403 (remote Apply blocked)."""
+    app = create_app(_cfg(tmp_path))
+    client = TestClient(app)
+    res = client.post(
+        "/admin/api/settings",
+        headers={"host": "192.168.1.5:4000"},
+        json={"cache": {"enabled": True, "mode": "exact", "similarity_threshold": 0.9, "semantic_scope": "full"}},
+    )
+    assert res.status_code == 403
+
+
+def test_mutate_allows_loopback_host_header(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Docker published-port: TestClient peer is not loopback, but Host is."""
+    cfg_path = tmp_path / "gateway.yaml"
+    dotenv = tmp_path / ".env"
+    raw = {
+        "listen": "0.0.0.0:4000",
+        "upstream_mode": "mock",
+        "models": {
+            "cheap": [
+                {
+                    "name": "ollama-cheap",
+                    "litellm_model": "ollama_chat/qwen3:8b",
+                    "api_base": "http://10.0.0.9:11434",
+                }
+            ],
+            "expensive": [
+                {"name": "openai-expensive", "litellm_model": "openai/gpt-4o-mini"}
+            ],
+        },
+        "cache": {
+            "enabled": True,
+            "mode": "exact",
+            "ttl_seconds": 86400,
+            "max_entries": 100,
+            "path": str(tmp_path / "cache"),
+            "similarity_threshold": 0.92,
+            "semantic_scope": "full",
+        },
+        "router": {
+            "strategy": "heuristic_cost_first",
+            "judge": {"enabled": False},
+            "expensive_keywords": [],
+            "expensive_min_chars": 2000,
+            "default_cheap_model": "ollama-cheap",
+        },
+        "litellm_host": "127.0.0.1",
+        "litellm_port": 4001,
+    }
+    cfg_path.write_text(yaml.safe_dump(raw))
+    monkeypatch.setenv("GATEWAY_CONFIG", str(cfg_path))
+    monkeypatch.setenv("GATEWAY_LITELLM_CONFIG", str(tmp_path / "generated_litellm.yaml"))
+    monkeypatch.setattr("edge.admin.default_config_path", lambda: cfg_path)
+    monkeypatch.setattr("edge.admin.default_dotenv_path", lambda: dotenv)
+    monkeypatch.setattr("edge.admin.repo_root", lambda: tmp_path)
+    (tmp_path / "logs").mkdir(parents=True)
+    monkeypatch.setattr(
+        "edge.admin.schedule_edge_restart",
+        lambda **_kw: {"restart_scheduled": True, "message": "ok"},
+    )
+    app = create_app(load_config(cfg_path))
+    client = TestClient(app)
+    # Peer is "testclient" (not loopback); Host loopback → allowed (Docker NAT case).
+    res = client.post(
+        "/admin/api/settings",
+        headers={"host": "127.0.0.1:4000"},
+        json={
+            "cache": {
+                "enabled": True,
+                "mode": "exact",
+                "similarity_threshold": 0.85,
+                "semantic_scope": "full",
+            }
+        },
+    )
+    assert res.status_code == 200, res.text
+    saved = yaml.safe_load(cfg_path.read_text())
+    assert saved["cache"]["similarity_threshold"] == 0.85
 
 
 def test_mutate_allows_loopback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -303,6 +398,43 @@ def test_require_localhost_raises():
 
     class _R:
         client = _C()
+        headers = {"host": "192.168.1.5:4000"}
+
+    with pytest.raises(Exception) as ei:
+        require_localhost(_R())  # type: ignore[arg-type]
+    assert getattr(ei.value, "status_code", None) == 403
+
+
+def test_require_localhost_allows_host_header_loopback():
+    """Docker published-port: bridge peer + Host 127.0.0.1:4000 is allowed."""
+    class _C:
+        host = "172.18.0.1"
+
+    class _R:
+        client = _C()
+        headers = {"host": "127.0.0.1:4000"}
+
+    require_localhost(_R())  # type: ignore[arg-type]
+
+
+def test_require_localhost_allows_localhost_host_header():
+    class _C:
+        host = "192.168.65.1"
+
+    class _R:
+        client = _C()
+        headers = {"host": "localhost:4000"}
+
+    require_localhost(_R())  # type: ignore[arg-type]
+
+
+def test_require_localhost_rejects_lan_host_with_bridge_peer():
+    class _C:
+        host = "172.18.0.1"
+
+    class _R:
+        client = _C()
+        headers = {"host": "192.168.4.31:4000"}
 
     with pytest.raises(Exception) as ei:
         require_localhost(_R())  # type: ignore[arg-type]

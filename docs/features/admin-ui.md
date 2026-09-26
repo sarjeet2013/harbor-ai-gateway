@@ -46,13 +46,18 @@ YAML remains the source of truth. Secrets **never** go into YAML or git.
 
 ## Security (localhost guard)
 
-**Mutating** admin routes (`POST /admin/api/settings`) refuse clients whose peer host is not loopback (`127.0.0.1`, `::1`, and IPv4-mapped forms). There is **no** second public admin port.
+**Mutating** admin routes (`POST /admin/api/settings`) allow Apply when **either**:
 
-- Open the UI via `http://127.0.0.1:<port>/admin` on the machine running Harbor.
-- Binding the edge to `0.0.0.0` still allows LAN clients to *view* `/admin` HTML/GET JSON; they cannot Apply. Prefer `listen: "127.0.0.1:4000"` if you want the UI unreachable from the LAN.
+1. The TCP peer host is loopback (`127.0.0.1`, `::1`, and IPv4-mapped forms), **or**
+2. The HTTP `Host` header is loopback (`127.0.0.1`, `localhost`, with or without a port) — including Docker Desktop / Compose published-port NAT, where the host browser opens `http://127.0.0.1:4000/admin` but the container sees a bridge/gateway peer (e.g. `172.x` / `192.168.65.1`).
+
+There is **no** second public admin port. If `Host` is a LAN or public address (e.g. `192.168.x.x:4000`), Apply is refused even when the peer is a Docker bridge IP.
+
+- Open the UI via `http://127.0.0.1:<port>/admin` (or `http://localhost:<port>/admin`) on the machine running Harbor.
+- Binding the edge to `0.0.0.0` still allows LAN clients to *view* `/admin` HTML/GET JSON; they cannot Apply (their `Host` is the LAN IP). Prefer `listen: "127.0.0.1:4000"` if you want the UI unreachable from the LAN.
 - No password / remote-admin auth in v1 (out of scope).
 
-When Harbor runs in Docker with `-p 4000:4000`, open the UI at `http://127.0.0.1:4000/admin` on the **host**. The browser connects to the published port on loopback, so Apply mutations still pass the localhost guard. Prefer not to publish `:4000` on a non-loopback interface if you want the UI unreachable from the LAN.
+When Harbor runs in Docker Compose with `ports: "4000:4000"`, open the UI at `http://127.0.0.1:4000/admin` on the **host**. Peer is not loopback inside the container, but `Host: 127.0.0.1:4000` satisfies the guard. Prefer not to publish `:4000` on a non-loopback interface if you want the UI unreachable from the LAN.
 
 See also [SECURITY.md](../SECURITY.md).
 

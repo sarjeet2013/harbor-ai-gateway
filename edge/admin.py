@@ -65,18 +65,52 @@ def is_loopback_host(host: str | None) -> bool:
     return False
 
 
+def hostname_from_host_header(host_header: str | None) -> str | None:
+    """Extract hostname from an HTTP Host header (strip port / brackets).
+
+    Examples: ``127.0.0.1:4000`` → ``127.0.0.1``, ``localhost``,
+    ``[::1]:4000`` → ``::1``. Returns None for empty/missing headers.
+    """
+    if not host_header:
+        return None
+    h = host_header.strip().lower()
+    if not h:
+        return None
+    # Bracketed IPv6: [::1] or [::1]:4000
+    if h.startswith("["):
+        end = h.find("]")
+        if end == -1:
+            return None
+        return h[1:end] or None
+    # hostname:port or IPv4:port (exactly one colon). Bare IPv6 (::1) has many.
+    if h.count(":") == 1:
+        return h.rsplit(":", 1)[0] or None
+    return h
+
+
 def require_localhost(request: Request) -> None:
-    """Refuse mutating admin calls from non-loopback clients."""
+    """Refuse mutating admin calls unless peer *or* Host header is loopback.
+
+    Peer loopback covers native/bind-local runs. Host-header loopback covers
+    Docker published ports (``ports: "4000:4000"``): the host browser opens
+    ``http://127.0.0.1:4000/admin`` but the container sees a bridge/gateway
+    peer (e.g. 172.x / 192.168.65.1). LAN/public Host values still refuse so
+    remote Apply stays blocked.
+    """
     peer = request.client.host if request.client else None
-    if not is_loopback_host(peer):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Admin mutations are localhost-only "
-                f"(client host {peer!r} is not loopback). "
-                "Open http://127.0.0.1:<port>/admin from this machine."
-            ),
-        )
+    if is_loopback_host(peer):
+        return
+    host_hdr = request.headers.get("host")
+    if is_loopback_host(hostname_from_host_header(host_hdr)):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Admin mutations are localhost-only "
+            f"(client host {peer!r}, Host {host_hdr!r} are not loopback). "
+            "Open http://127.0.0.1:<port>/admin from this machine."
+        ),
+    )
 
 
 def default_dotenv_path() -> Path:
@@ -540,6 +574,7 @@ __all__ = [
     "build_settings_payload",
     "create_admin_router",
     "env_key_is_set",
+    "hostname_from_host_header",
     "is_loopback_host",
     "mount_admin",
     "require_localhost",
