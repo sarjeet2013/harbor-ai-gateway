@@ -1,0 +1,6 @@
+[
+  {"prompt": "Say hello in one word.", "label": "chat"},
+  {"prompt": "Please write a function to parse JSON.", "label": "coder"},
+  {"prompt": "Solve this math problem step by step: 17*19.", "label": "reason"},
+  {"prompt": "Please refactor this module's architecture carefully.", "label": "expensive"}
+]

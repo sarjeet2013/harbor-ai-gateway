@@ -76,6 +76,16 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
     budget = DayBudget(config)
     ledger = Ledger(config.ledger_path)
     proxy = LiteLLMProxy(config.litellm_base_url)
+
+    def _route_ledger_fields(decision) -> dict:
+        """Core route fields + optional judge extras for JSONL ledger rows."""
+        row = {
+            "model": decision.model,
+            "pool": decision.pool,
+            "reason": decision.reason,
+        }
+        row.update(decision.ledger_extras())
+        return row
     cache = ResponseCache(
         config.cache,
         default_embedding_api_base=cheap_pool_embedding_api_base(config.models.cheap),
@@ -167,9 +177,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 ledger.write(
                     {
                         "surface": surface,
-                        "model": decision.model,
-                        "pool": decision.pool,
-                        "reason": decision.reason,
+                        **_route_ledger_fields(decision),
                         "client_model": client_model,
                         "status": status,
                         "status_code": status_code,
@@ -212,9 +220,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
             ledger.write(
                 {
                     "surface": surface,
-                    "model": decision.model,
-                    "pool": decision.pool,
-                    "reason": decision.reason,
+                    **_route_ledger_fields(decision),
                     "client_model": client_model,
                     "status": "upstream_error",
                     "status_code": status_code,
@@ -330,9 +336,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
                 ledger.write(
                     {
                         "surface": surface,
-                        "model": decision.model,
-                        "pool": decision.pool,
-                        "reason": decision.reason,
+                        **_route_ledger_fields(decision),
                         "client_model": client_model,
                         "status": "ok",
                         "status_code": 200,
@@ -462,9 +466,7 @@ def create_app(cfg: GatewayConfig | None = None) -> FastAPI:
         ledger.write(
             {
                 "surface": surface,
-                "model": decision.model,
-                "pool": decision.pool,
-                "reason": decision.reason,
+                **_route_ledger_fields(decision),
                 "client_model": client_model,
                 "status": status,
                 "status_code": status_code,

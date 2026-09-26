@@ -7,7 +7,7 @@ Source of truth: `config/gateway.yaml` + `python -m edge` (see `edge/cli.py`, `e
 1. **Clients** — curl/SDK first; Codex (`/v1/responses` or chat); Claude Code (Anthropic `/v1/messages`); Cursor (public HTTPS + Harbor `/cursor` — see [features/cursor.md](features/cursor.md)).
 2. **Edge (ours)** — FastAPI on `:4000` (`listen`); budget → router → **cache** → ledger before upstream. Started by `python -m edge start`. Cache hits **skip upstream**.
 3. **Day budget** — spend-so-far vs `daily_budget_usd`; over budget → `on_budget_exceeded` (`force_cheap` | `reject`). Persisted to `budget_state_path` (default `data/budget.json`). Pure cache hits do **not** increment spend.
-4. **Heuristic router** — classify request; pick from `models.cheap` / `models.expensive` pools (alias = each entry’s `name`). Phase-1 **task-class** within cheap (`coder` / `reason` / default chat) via config keywords — see [features/routing.md](features/routing.md). **Intelligent (LLM judge) routing** is still planned.
+4. **Router (judge default)** — classify request; pick from `models.cheap` / `models.expensive` pools (alias = each entry’s `name`). Live default **`judge_then_heuristic`**: local Ollama judge (`qwen3:8b`) with keyword/length **heuristic fallback** — see [features/routing.md](features/routing.md).
 5. **Response cache** — exact + optional semantic cache on disk (`data/cache/`); see [features/cache.md](features/cache.md). Semantic = exact-first then Ollama embeddings + cosine threshold.
 6. **Ledger** — JSONL at `ledger_path` (default `logs/ledger.jsonl`): model, reason, pool, tokens, cost, status, plus cache fields when implemented (`cache_hit`, `cache_kind`, `tokens_saved*`).
 7. **Translate** — `edge/translate.py` maps Anthropic Messages and OpenAI Responses to OpenAI Chat Completions (and back) when `upstream_mode: litellm`, so Ollama/LiteLLM only need chat.
@@ -51,7 +51,7 @@ flowchart LR
 
   subgraph edge [Our edge :4000]
     BUDGET[Day budget gate]
-    ROUTER[Heuristic router]
+    ROUTER[Judge / heuristic router]
     CACHE[Response cache]
     LEDGER[Ledger]
   end
@@ -74,4 +74,7 @@ Same path for all clients once traffic hits the edge: clients → edge `:4000` �
 ## Planned (not yet shipped)
 
 - **Responses streaming** — chat + Anthropic messages SSE (incl. cache hit replay / miss tee-store) ship; OpenAI `/v1/responses` with `stream: true` still returns 501. See [features/streaming.md](features/streaming.md).
-- **Intelligent / judge routing** — after cache; phase-1 task-class heuristic is shipping ([features/routing.md](features/routing.md)); LLM judge remains planned.
+
+## Shipped recently
+
+- **Intelligent / judge routing** — live default in `gateway.yaml` (`judge_then_heuristic`); heuristic is fallback only. Judge runs in the router **before** cache (model identity aligned with cache key). See [features/routing.md](features/routing.md).

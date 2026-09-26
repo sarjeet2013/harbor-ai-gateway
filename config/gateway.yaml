@@ -59,7 +59,14 @@ models:
     #   api_base: http://127.0.0.1:11434
 
 router:
-  strategy: heuristic_cost_first
+  strategy: judge_then_heuristic   # LIVE default — judge primary; heuristic on fail/timeout/low conf
+  judge:
+    enabled: true
+    litellm_model: ollama_chat/qwen3:8b   # never a 14B for classification
+    api_base: http://192.168.4.31:11434
+    timeout_ms: 400
+    min_confidence: 0.55
+    on_failure: heuristic
   # Prefer expensive if any of these match (case-insensitive) in the prompt text
   expensive_keywords:
     - "refactor"
@@ -70,7 +77,7 @@ router:
     - "write a detailed"
   # Prefer expensive if estimated prompt chars exceed this
   expensive_min_chars: 2000
-  # Phase-1 task-class within cheap (after expensive check; client alias still wins)
+  # Keyword rails: fallback when judge fails / strategy heuristic_cost_first (client alias still wins)
   default_cheap_model: ollama-cheap
   coder_model: ollama-coder
   reason_model: ollama-reason

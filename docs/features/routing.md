@@ -1,40 +1,78 @@
-# Feature: Heuristic routing (phase-1 task-class)
+# Feature: Intelligent (LLM judge) routing
 
-**Status:** **Shipped (phase 1).** Harbor’s edge router is **heuristic only** (keywords + length). An LLM **judge** after the cache is still **planned** — not implemented here.
+**Status:** **Shipped as live default.** Harbor’s edge router uses a local Ollama **judge** (`qwen3:8b`) as the primary strategy (`router.strategy: judge_then_heuristic`). Keyword / length **heuristic** remains the failure / timeout / low-confidence fallback — not removed.
 
 ## Decision order
 
-1. **Client-requested model alias** — if `body.model` matches a configured pool `name` (`ollama-cheap`, `ollama-coder`, `openai-expensive`, …), that alias **wins**. Ledger reason: `client:model`.
-2. **Expensive pool** — user/assistant prompt text (system prompts skipped) matches `router.expensive_keywords` or exceeds `router.expensive_min_chars` → primary expensive alias. Reasons: `heuristic:expensive_keyword`, `heuristic:expensive_min_chars`.
-3. **Cheap task-class** (phase 1) — within the cheap pool, config-driven keywords pick by **name**:
-   - `coder_keywords` → `router.coder_model` (default `ollama-coder`) → `heuristic:coder_keyword`
-   - `reason_keywords` → `router.reason_model` (default `ollama-reason`) → `heuristic:reason_keyword`
-   - else → `router.default_cheap_model` (default `ollama-cheap`) → `heuristic:default_cheap`
+1. **Client-requested Harbor alias** — if `body.model` matches a configured pool `name` (`ollama-cheap`, `ollama-coder`, `openai-expensive`, …), that alias **wins**. No judge call. Ledger reason: `client:model`.
+2. **Judge** (when `strategy: judge_then_heuristic` and `router.judge.enabled`) — classifies **last-user text** plus light signals (`chars≈N`, `tools=yes|no`). Closed labels only:
+   - `chat` → `router.default_cheap_model` (default `ollama-cheap`) → `judge:chat`
+   - `coder` → `router.coder_model` (default `ollama-coder`) → `judge:coder`
+   - `reason` → `router.reason_model` (default `ollama-reason`) → `judge:reason`
+   - `expensive` → primary expensive alias → `judge:expensive`
+3. **Fallback** — judge timeout, HTTP/parse failure, confidence &lt; `min_confidence`, or disabled judge → existing expensive + task-class keyword rails. Reason: `judge_fallback:heuristic:…`.
+4. **Budget `force_cheap`** — still forces the cheap pool. Within cheap, judge may pick chat/coder/reason; an `expensive` label is remapped via cheap heuristic (not cloud).
 
-Unknown client model ids (e.g. Claude Code’s stock model name) do **not** pin routing — steps 2–3 apply. Budget `force_cheap` still forces the cheap pool (task-class may apply).
+Unknown client model ids (e.g. Claude Code’s stock model name) do **not** pin routing — steps 2–3 apply.
 
-Source: `edge/router.py`, keywords + alias targets in `config/gateway.yaml` → `router:`.
+Source: `edge/judge.py`, `edge/router.py`; config in `config/gateway.yaml` → `router:`.
+
+## Judge config (live)
+
+```yaml
+router:
+  strategy: judge_then_heuristic
+  judge:
+    enabled: true
+    litellm_model: ollama_chat/qwen3:8b   # never a 14B for classification
+    api_base: http://192.168.4.31:11434
+    timeout_ms: 400
+    min_confidence: 0.55
+    on_failure: heuristic
+```
+
+`strategy: heuristic_cost_first` remains supported (mock / tests). Live `gateway.yaml` ships `judge_then_heuristic`.
+
+## Judge vs cache
+
+Order stays **budget → router → cache**. The judge runs in the router **before** cache (same as the old heuristic) so the chosen model identity stays consistent with the cache key. Prefer a fast judge (`timeout_ms` &lt; 500). Cache hits still skip upstream, but route was already chosen.
+
+Ledger optional extras when the judge ran: `judge_ms`, `judge_label`, `judge_confidence`.
+
+## Heuristic rails (fallback)
+
+Same keyword lists as phase-1:
+
+| Match | Pool / alias | Reason |
+| --- | --- | --- |
+| `expensive_keywords` / `expensive_min_chars` | expensive | `heuristic:expensive_*` |
+| `coder_keywords` | `coder_model` | `heuristic:coder_keyword` |
+| `reason_keywords` | `reason_model` | `heuristic:reason_keyword` |
+| else | `default_cheap_model` | `heuristic:default_cheap` |
 
 ## Cheap pool aliases (default hybrid)
 
 | Alias | LiteLLM model | Role |
 | --- | --- | --- |
-| `ollama-cheap` | `ollama_chat/qwen3:8b` + Mini `api_base` | **Default chat** (keep for existing Claude Code / Cursor configs). `extra_litellm_params.think: false`. |
+| `ollama-cheap` | `ollama_chat/qwen3:8b` + Mini `api_base` | Default chat / judge `chat` |
 | `ollama-chat` | same 8b | Optional duplicate chat name |
-| `ollama-coder` | `ollama_chat/qwen2.5-coder:14b` | Code / implement / fix / tests |
-| `ollama-reason` | `ollama_chat/deepseek-r1:14b` | Step-by-step / math / prove (alt: `qwen3:14b` in YAML comments) |
+| `ollama-coder` | `ollama_chat/qwen2.5-coder:14b` | Judge `coder` |
+| `ollama-reason` | `ollama_chat/deepseek-r1:14b` | Judge `reason` |
 
-All enabled cheap aliases are emitted into generated LiteLLM config (`edge/litellm_gen.py`).
+## VRAM / latency notes
 
-## VRAM note
+- Judge must stay on the **hot 8b** (`qwen3:8b`), never a 14B classifier.
+- Mini typically should **not** keep two 14Bs resident; Ollama swaps coder ↔ reason.
+- If Mini judge TTFB exceeds `timeout_ms`, expect `judge_fallback:heuristic:…` in the ledger (still correct routing via keywords). Raise `timeout_ms` only if you accept added edge latency.
 
-Mini typically should **not** keep two 14B models resident. Ollama will swap; expect a cold load when switching `ollama-coder` ↔ `ollama-reason`. Prefer one “hot” 14B for your session when possible.
+## Kill / rollback criteria (brief)
+
+- Sustained judge timeouts dominating ledger, *and* heuristic quality acceptable → set `strategy: heuristic_cost_first` or `judge.enabled: false`, restart.
+- Wrong-pool spikes after ship → tighten labels via prompt/examples or temporarily raise `min_confidence`.
 
 ## Claude Code / Cursor
 
-- **Default path:** leave the client model as a non-Harbor id (or omit a Harbor pin). Harbor lands on **`ollama-cheap`** unless task-class or expensive heuristics fire.
-- **Auto coder:** prompt text hits `coder_keywords` → routed to **`ollama-coder`** (ledger `heuristic:coder_keyword`).
-- **Force coder:** set the request model / `ANTHROPIC_MODEL` to **`ollama-coder`** (wins as `client:model`).
-- **Pin 8b chat:** set model to **`ollama-cheap`** (or `ollama-chat`) — disables task-class upgrades for that request.
+- **Default path:** leave the client model as a non-Harbor id. Harbor runs the judge (or heuristic fallback).
+- **Force coder / chat / expensive:** set the request model / `ANTHROPIC_MODEL` to the Harbor alias (`client:model`).
 
 See also [hybrid.md](hybrid.md) and [architecture.md](../architecture.md).

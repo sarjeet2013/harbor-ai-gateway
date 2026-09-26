@@ -8,17 +8,32 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class JudgeConfig(BaseModel):
+    """LLM judge for ``router.strategy: judge_then_heuristic`` (local Ollama)."""
+
+    enabled: bool = True
+    litellm_model: str = "ollama_chat/qwen3:8b"
+    api_base: str = "http://192.168.4.31:11434"
+    timeout_ms: int = 400
+    min_confidence: float = 0.55
+    on_failure: str = "heuristic"  # heuristic
+
+
 class RouterConfig(BaseModel):
-    strategy: str = "heuristic_cost_first"
+    # Live default: judge primary, heuristic on failure/timeout/low confidence.
+    # ``heuristic_cost_first`` remains supported for mock/tests.
+    strategy: str = "judge_then_heuristic"
     expensive_keywords: list[str] = Field(default_factory=list)
     expensive_min_chars: int = 2000
-    # Phase-1 task-class routing within the cheap pool (heuristic, not LLM judge)
+    # Keyword rails — used as primary when strategy is heuristic_cost_first,
+    # and as fallback when strategy is judge_then_heuristic.
     coder_keywords: list[str] = Field(default_factory=list)
     reason_keywords: list[str] = Field(default_factory=list)
     # Alias names looked up in models.cheap (must match entry `name`)
     default_cheap_model: str = "ollama-cheap"
     coder_model: str = "ollama-coder"
     reason_model: str = "ollama-reason"
+    judge: JudgeConfig = Field(default_factory=JudgeConfig)
 
 
 class ModelSpec(BaseModel):

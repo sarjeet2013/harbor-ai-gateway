@@ -22,7 +22,10 @@ models:
     - name: mock-expensive
 
 router:
+  # Mock stays heuristic for deterministic tests; live gateway.yaml uses judge_then_heuristic.
   strategy: heuristic_cost_first
+  judge:
+    enabled: false
   expensive_keywords:
     - "refactor"
     - "architecture"

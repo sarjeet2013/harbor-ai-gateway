@@ -195,7 +195,7 @@ Response cache on local disk (`data/cache/`) — **enabled by default** in `conf
 python -m edge cache-stats   # hit rate + tokens_saved from ledger
 ```
 
-Intelligent (judge) routing remains **planned**. Details: **[docs/features/cache.md](docs/features/cache.md)**.
+Intelligent (judge) routing is the **live default** (`judge_then_heuristic`); heuristic is fallback. Details: **[docs/features/routing.md](docs/features/routing.md)**.
 
 **Streaming (v1 chat):** `POST /v1/chat/completions` with `"stream": true` returns SSE (`text/event-stream`); cache is bypassed; ledger + budget update once after the stream completes. Messages/Responses streaming still planned (501 if `stream: true`). Details: **[docs/features/streaming.md](docs/features/streaming.md)**.
 
@@ -242,7 +242,7 @@ Logs: `logs/edge.log`, `logs/litellm.log`.
 
 **In:** wrap LiteLLM; heuristic cheap vs expensive; day USD budget; exact + semantic response cache + tokens_saved; ledger; single YAML; CLI start/stop; client attach docs; mock mode for demos.
 
-**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **In (streaming):** chat SSE passthrough. **Planned later:** Responses SSE (where still 501); intelligent/judge routing.
+**Out:** multi-user cloud, control-plane UI, Postgres, rebuilding clients. **In:** chat SSE passthrough; intelligent/judge routing (live default). **Planned later:** Responses SSE (where still 501).
 
 ## Status
 

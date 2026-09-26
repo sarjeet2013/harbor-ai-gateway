@@ -1,6 +1,6 @@
 # Response cache
 
-**Status:** **Exact + semantic cache shipping**. Exact is the default in live `gateway.yaml`; set `mode: semantic` after pulling an embedding model on Ollama (e.g. Mini). Intelligent (judge) routing remains **planned**.
+**Status:** **Exact + semantic cache shipping**. Exact is the default in live `gateway.yaml`; set `mode: semantic` after pulling an embedding model on Ollama (e.g. Mini). Intelligent (judge) routing is **shipped** as live default (see [routing.md](routing.md)); judge runs before cache.
 
 Harbor’s differentiation vs smart-routing-only gateways: prove value with **tokens saved** via response caching at the edge.
 
@@ -67,7 +67,7 @@ See [streaming.md](streaming.md).
 
 ## Out of scope / next
 
-- **Intelligent (judge) routing** — planned **after** cache. Not built yet; Omnigent-style smart routing is a follow-on, not a substitute for tokens-saved cache.
+- **Intelligent (judge) routing** — **shipped** in the router **before** cache (model identity consistent with cache key). See [routing.md](routing.md). Not a substitute for tokens-saved cache.
 - Multi-node / Redis shared cache.
 
 ## Storage
