@@ -229,8 +229,14 @@
     $("key-xai").value = "";
     $("apply-hint").textContent = data.message || "";
     toast(data.message || "Saved", true);
-    // Refresh status from disk-backed GET
-    await loadSettings();
+    // Refresh may fail briefly while edge restarts — that is expected.
+    try {
+      await loadSettings();
+    } catch (_e) {
+      $("apply-hint").textContent =
+        (data.message || "Saved") +
+        " Reload this page in a few seconds if status does not refresh.";
+    }
   }
 
   $("add-cheap").addEventListener("click", function () {

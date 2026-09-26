@@ -17,6 +17,7 @@ from edge.admin import (
     env_key_is_set,
     is_loopback_host,
     require_localhost,
+    schedule_edge_restart,
     update_dotenv_keys,
 )
 from edge.config import (
@@ -179,23 +180,36 @@ def test_mutate_allows_loopback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     with patch("edge.admin.is_loopback_host", return_value=True):
         with patch("edge.admin.default_dotenv_path", return_value=dotenv):
             with patch("edge.admin.default_config_path", return_value=cfg_path):
-                res = client.post(
-                    "/admin/api/settings",
-                    json={
-                        "cache": {
-                            "enabled": True,
-                            "mode": "semantic",
-                            "similarity_threshold": 0.88,
-                            "embedding_model": "nomic-embed-text",
-                            "embedding_api_base": "http://10.0.0.9:11434",
-                            "semantic_scope": "last_user",
-                        }
+                with patch(
+                    "edge.admin.schedule_edge_restart",
+                    return_value={
+                        "restart_scheduled": True,
+                        "restart_helper_pid": 99999,
+                        "message": (
+                            "Settings saved. Harbor edge and LiteLLM are "
+                            "restarting to apply changes (brief downtime)."
+                        ),
                     },
-                )
+                ) as sched:
+                    res = client.post(
+                        "/admin/api/settings",
+                        json={
+                            "cache": {
+                                "enabled": True,
+                                "mode": "semantic",
+                                "similarity_threshold": 0.88,
+                                "embedding_model": "nomic-embed-text",
+                                "embedding_api_base": "http://10.0.0.9:11434",
+                                "semantic_scope": "last_user",
+                            }
+                        },
+                    )
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["ok"] is True
+    assert body["restart_scheduled"] is True
     assert "restart" in body["message"].lower()
+    sched.assert_called_once()
 
     saved = yaml.safe_load(cfg_path.read_text())
     assert saved["cache"]["mode"] == "semantic"
@@ -293,3 +307,53 @@ def test_require_localhost_raises():
     with pytest.raises(Exception) as ei:
         require_localhost(_R())  # type: ignore[arg-type]
     assert getattr(ei.value, "status_code", None) == 403
+
+
+def test_schedule_edge_restart_spawns_detached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """schedule_edge_restart must Popen a detached restart helper (not kill in-process)."""
+    monkeypatch.setattr("edge.admin.repo_root", lambda: tmp_path)
+    (tmp_path / "logs").mkdir(parents=True)
+
+    class _Proc:
+        pid = 4242
+
+    calls: list[dict] = []
+
+    def _fake_popen(cmd, **kwargs):
+        calls.append({"cmd": cmd, **kwargs})
+        return _Proc()
+
+    with patch("edge.admin.subprocess.Popen", side_effect=_fake_popen):
+        meta = schedule_edge_restart(delay_seconds=0.5)
+
+    assert meta["restart_scheduled"] is True
+    assert meta["restart_helper_pid"] == 4242
+    assert "restarting" in meta["message"].lower()
+    assert len(calls) == 1
+    cmd = calls[0]["cmd"]
+    assert cmd[1:4] == ["-m", "edge", "restart"]
+    assert "--delay" in cmd and "0.5" in cmd
+    assert "--detach" in cmd
+    assert calls[0]["start_new_session"] is True
+    assert calls[0]["cwd"] == str(tmp_path)
+
+
+def test_schedule_edge_restart_failure_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("edge.admin.repo_root", lambda: tmp_path)
+    (tmp_path / "logs").mkdir(parents=True)
+
+    with patch("edge.admin.subprocess.Popen", side_effect=OSError("boom")):
+        meta = schedule_edge_restart()
+
+    assert meta["restart_scheduled"] is False
+    assert "auto-restart failed" in meta["message"].lower()
+    assert "python -m edge restart" in meta["message"]
+
+
+def test_get_settings_restart_note_mentions_auto(tmp_path: Path):
+    app = create_app(_cfg(tmp_path))
+    client = TestClient(app)
+    data = client.get("/admin/api/settings").json()
+    note = (data.get("restart_note") or "").lower()
+    assert "restart" in note
+    assert "automatically" in note or "auto" in note

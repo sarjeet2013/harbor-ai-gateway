@@ -1,4 +1,4 @@
-"""CLI: python -m edge {start|stop|status|config-check|cache-stats|doctor|models} (+ Admin UI at /admin)"""
+"""CLI: python -m edge {start|stop|restart|status|config-check|cache-stats|doctor|models} (+ Admin UI at /admin)"""
 
 from __future__ import annotations
 
@@ -570,6 +570,25 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 
 
+def cmd_restart(args: argparse.Namespace) -> int:
+    """Stop edge + LiteLLM, then start again (same as stop && start).
+
+    ``--delay`` waits before stopping so callers (e.g. Admin Apply) can finish
+    sending an HTTP response before this process kills the edge.
+    ``--detach`` is forwarded to ``start`` (Admin auto-restart always uses it).
+    """
+    delay = float(getattr(args, "delay", 0) or 0)
+    if delay > 0:
+        print(f"restart: waiting {delay:.1f}s before stop…")
+        time.sleep(delay)
+    print("restart: stopping…")
+    cmd_stop(args)
+    # Brief settle so ports / process groups fully release
+    time.sleep(0.3)
+    print("restart: starting…")
+    return cmd_start(args)
+
+
 def cmd_cache_stats(_args: argparse.Namespace | None = None) -> int:
     """Summarize cache hits / tokens_saved from ledger (+ disk entry count)."""
     ensure_deps()
@@ -734,7 +753,7 @@ def cmd_models_set(args: argparse.Namespace) -> int:
         "note: PyYAML rewrite may drop inline comments "
         "(see config/gateway.yaml.example for the annotated template)."
     )
-    print("restart to apply: python -m edge stop && python -m edge start")
+    print("restart to apply: python -m edge restart")
     return 0
 
 
@@ -820,6 +839,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     stop_p = sub.add_parser("stop", help="stop edge and LiteLLM via pidfile/ports")
     stop_p.set_defaults(func=cmd_stop)
+
+    restart_p = sub.add_parser(
+        "restart",
+        help="stop then start edge (+ LiteLLM); use --detach for background",
+    )
+    restart_p.add_argument(
+        "--detach",
+        "-d",
+        action="store_true",
+        help="run start in background (write pidfile and exit)",
+    )
+    restart_p.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="seconds to wait before stop (Admin Apply uses this so HTTP can finish)",
+    )
+    restart_p.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="open admin UI after start (same as start --open-browser)",
+    )
+    restart_p.set_defaults(func=cmd_restart)
 
     status_p = sub.add_parser("status", help="show pids/ports and model pools")
     status_p.set_defaults(func=cmd_status)
@@ -909,6 +952,7 @@ def main(argv: list[str] | None = None) -> int:
     # Defense in depth when CLI is imported without going through __main__
     if args.command in (
         "start",
+        "restart",
         "status",
         "config-check",
         "cache-stats",

@@ -54,19 +54,24 @@ YAML remains the source of truth. Secrets **never** go into YAML or git.
 
 See also [SECURITY.md](../SECURITY.md).
 
-## Restart behavior (v1)
+## Restart behavior
 
 After a successful Apply:
 
 1. `gateway.yaml` is rewritten (PyYAML round-trip — **inline comments are not preserved**; same as `python -m edge models set`).
 2. LiteLLM config is regenerated (`config/.generated_litellm.yaml`) when generation succeeds.
-3. Response message: restart required —
+3. The API schedules an automatic restart of **edge + LiteLLM** via a detached helper:
+   `python -m edge restart --delay 0.5 --detach` (logged to `logs/restart.log`).
+4. Response includes `restart_scheduled: true` and a message that services are restarting.
+   If spawning the helper fails, `restart_scheduled` is `false` and the message tells you to run:
 
 ```bash
-python -m edge stop && python -m edge start
+python -m edge restart
 ```
 
-v1 does **not** hot-reload router/cache/LiteLLM in-process (prefer a clear restart over a fragile reload).
+There is a short downtime window (typically ~1–3s) while processes stop and come back. The Apply JSON is returned **before** processes are killed so the browser always gets a success response.
+
+Harbor does **not** hot-reload router/cache/LiteLLM in-process (prefer a supervised process restart over a fragile reload).
 
 ## Implementation
 

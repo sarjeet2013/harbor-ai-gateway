@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +38,17 @@ _LOOPBACK_HOSTS = frozenset(
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _FRONTIER_KEYS = ("OPENAI_API_KEY", "XAI_API_KEY")
 
-_RESTART_MSG = (
-    "Settings saved. Restart required to apply: "
-    "python -m edge stop && python -m edge start"
+_RESTART_NOTE = (
+    "Apply saves config and automatically restarts edge + LiteLLM "
+    "(brief downtime while services come back)."
+)
+_RESTART_SCHEDULED_MSG = (
+    "Settings saved. Harbor edge and LiteLLM are restarting to apply changes "
+    "(brief downtime)."
+)
+_RESTART_FAILED_MSG = (
+    "Settings saved, but auto-restart failed to schedule. "
+    "Run: python -m edge restart"
 )
 
 
@@ -311,7 +321,7 @@ def build_settings_payload(
             key: env_key_is_set(key, dotenv_path=dotenv_path) for key in _FRONTIER_KEYS
         },
         "config_path": str(path),
-        "restart_note": _RESTART_MSG,
+        "restart_note": _RESTART_NOTE,
     }
 
 
@@ -410,11 +420,53 @@ def apply_settings(
         "config_path": str(path),
         "litellm_config": litellm_path,
         "secrets_updated": secrets_updated,  # key names only
-        "message": _RESTART_MSG,
+        "message": "Settings saved.",
         "secrets": {
             key: env_key_is_set(key, dotenv_path=dotenv_path) for key in _FRONTIER_KEYS
         },
     }
+
+
+def schedule_edge_restart(*, delay_seconds: float = 0.5) -> dict[str, Any]:
+    """Spawn a detached ``python -m edge restart`` so Apply can return first.
+
+    The helper sleeps ``delay_seconds``, then stops and starts edge + LiteLLM
+    (detached). Logs go to ``logs/restart.log``. Returns response meta; never
+    raises — scheduling failure is returned as ``restart_scheduled: false``.
+    """
+    try:
+        root = repo_root()
+        log_dir = root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "restart.log"
+        log_f = log_path.open("a")
+        cmd = [
+            sys.executable,
+            "-m",
+            "edge",
+            "restart",
+            "--delay",
+            str(delay_seconds),
+            "--detach",
+        ]
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(root),
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=dict(os.environ),
+        )
+        return {
+            "restart_scheduled": True,
+            "restart_helper_pid": proc.pid,
+            "message": _RESTART_SCHEDULED_MSG,
+        }
+    except Exception as e:
+        return {
+            "restart_scheduled": False,
+            "message": f"{_RESTART_FAILED_MSG} ({e})",
+        }
 
 
 def create_admin_router(app: FastAPI) -> APIRouter:
@@ -450,12 +502,13 @@ def create_admin_router(app: FastAPI) -> APIRouter:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"save failed: {e}") from e
-        # Refresh in-memory config reference for subsequent GETs of YAML-backed fields.
-        # Runtime cache/router/budget still need a process restart (message says so).
+        # Refresh in-memory config for any GETs before the scheduled restart lands.
         try:
             request.app.state.config = load_config()
         except Exception:
             pass
+        # Detached helper sleeps briefly, then stop+start — must not kill us mid-response.
+        result.update(schedule_edge_restart(delay_seconds=0.5))
         return JSONResponse(result)
 
     @router.get("/admin", include_in_schema=False)
@@ -490,5 +543,6 @@ __all__ = [
     "is_loopback_host",
     "mount_admin",
     "require_localhost",
+    "schedule_edge_restart",
     "update_dotenv_keys",
 ]

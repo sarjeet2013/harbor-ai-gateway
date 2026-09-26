@@ -205,13 +205,14 @@ Override path with `GATEWAY_CONFIG`. Legacy bare string pools still load; prefer
 | `python -m edge start` | Generate LiteLLM YAML; start LiteLLM (if litellm mode) + edge |
 | `python -m edge start --detach` (`-d`) | Background (`data/gateway.pid`) |
 | `python -m edge stop` | Stop via pidfile / ports |
+| `python -m edge restart` | Stop then start (optional `--detach`, `--delay SEC`) |
 | `python -m edge status` | Ports, pids, upstream_mode, models |
 | `python -m edge config-check` | Resolved aliases → `litellm_model` |
 | `python -m edge models` / `models set` | List / edit cheap & expensive pools |
 | `python -m edge cache-stats` | Hit rate + tokens saved |
 | `python -m edge doctor` | Deps + soft-probe Ollama `api_base` |
 
-Restart after `models set`: `python -m edge stop && python -m edge start`.
+Restart after `models set`: `python -m edge restart` (Admin Apply auto-restarts).
 
 Logs: `logs/edge.log`, `logs/litellm.log`.
 
